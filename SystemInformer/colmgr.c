@@ -25,6 +25,24 @@ typedef struct _PH_CM_SORT_CONTEXT
     PH_SORT_ORDER SortOrder;
 } PH_CM_SORT_CONTEXT, *PPH_CM_SORT_CONTEXT;
 
+typedef struct _PH_CM_SORT_KEY
+{
+    PPH_CM_COMPARE_FUNCTION CompareFunction; // Built-in column
+    PVOID CompareContext;
+    PPH_PLUGIN_TREENEW_SORT_FUNCTION PluginSortFunction; // Plugin column
+    ULONG SubId;
+    PVOID PluginContext;
+    PH_SORT_ORDER SortOrder;
+} PH_CM_SORT_KEY, *PPH_CM_SORT_KEY;
+
+typedef struct _PH_CM_MULTI_SORT_CONTEXT
+{
+    ULONG NumberOfKeys;
+    PH_CM_SORT_KEY Keys[PH_TREENEW_MAX_SORT_KEYS];
+    PPH_CM_POST_SORT_FUNCTION PostSortFunction;
+    PH_SORT_ORDER PrimarySortOrder;
+} PH_CM_MULTI_SORT_CONTEXT, *PPH_CM_MULTI_SORT_CONTEXT;
+
 /**
  * Initializes a column manager instance.
  *
@@ -44,6 +62,9 @@ VOID PhCmInitializeManager(
     Manager->MinId = MinId;
     Manager->NextId = MinId;
     Manager->PostSortFunction = PostSortFunction;
+    Manager->SortFunctions = NULL;
+    Manager->NumberOfSortFunctions = 0;
+    Manager->SortContext = NULL;
     InitializeListHead(&Manager->ColumnListHead);
     Manager->NotifyList = NULL;
 }
@@ -371,6 +392,136 @@ BOOLEAN PhCmForwardSort(
 }
 
 /**
+ * Registers the comparison functions for the built-in (non-plugin) columns of a
+ * TreeNew control so that PhCmSortNodes can sort by multiple keys.
+ *
+ * \param Manager A pointer to the column manager.
+ * \param SortFunctions An array of comparison functions indexed by column ID. Entries may be NULL.
+ * The array must remain valid for the lifetime of the manager.
+ * \param NumberOfSortFunctions The number of entries in the array.
+ * \param Context A context value passed to each comparison function.
+ */
+VOID PhCmRegisterSortFunctions(
+    _Inout_ PPH_CM_MANAGER Manager,
+    _In_reads_(NumberOfSortFunctions) const PPH_CM_COMPARE_FUNCTION *SortFunctions,
+    _In_ ULONG NumberOfSortFunctions,
+    _In_opt_ PVOID Context
+    )
+{
+    Manager->SortFunctions = SortFunctions;
+    Manager->NumberOfSortFunctions = NumberOfSortFunctions;
+    Manager->SortContext = Context;
+}
+
+static int __cdecl PhCmpMultiSortFunction(
+    _In_ void *context,
+    _In_ const void *elem1,
+    _In_ const void *elem2
+    )
+{
+    PPH_CM_MULTI_SORT_CONTEXT sortContext = context;
+    PVOID node1 = *(PVOID *)elem1;
+    PVOID node2 = *(PVOID *)elem2;
+    LONG result = 0;
+    ULONG i;
+
+    for (i = 0; i < sortContext->NumberOfKeys; i++)
+    {
+        PPH_CM_SORT_KEY key = &sortContext->Keys[i];
+
+        if (key->CompareFunction)
+            result = key->CompareFunction(node1, node2, key->SortOrder, key->CompareContext);
+        else
+            result = key->PluginSortFunction(node1, node2, key->SubId, key->SortOrder, key->PluginContext);
+
+        if (result != 0)
+            return PhModifySort(result, key->SortOrder);
+    }
+
+    // All keys are equal; use the list's stable tie-breaker. The post-sort
+    // function applies the order itself, so pass the primary key's order.
+    if (sortContext->PostSortFunction)
+        return sortContext->PostSortFunction(0, node1, node2, sortContext->PrimarySortOrder);
+
+    return 0;
+}
+
+/**
+ * Sorts an array of TreeNew nodes using all of the control's current sort keys
+ * (primary key first, then the Shift+click secondary keys).
+ *
+ * Built-in columns use the functions registered with PhCmRegisterSortFunctions;
+ * plugin columns use their registered plugin sort function.
+ *
+ * \param Manager A pointer to the column manager.
+ * \param Nodes An array of pointers to TreeNew nodes to sort.
+ * \param NumberOfNodes The number of nodes in the array.
+ * \return TRUE if the nodes were sorted, FALSE if there was nothing to sort by.
+ */
+BOOLEAN PhCmSortNodes(
+    _In_ PPH_CM_MANAGER Manager,
+    _Inout_updates_(NumberOfNodes) PPH_TREENEW_NODE *Nodes,
+    _In_ ULONG NumberOfNodes
+    )
+{
+    PH_TREENEW_SORT_KEYS sortKeys;
+    PH_CM_MULTI_SORT_CONTEXT sortContext;
+    ULONG i;
+
+    if (!Manager->Handle || NumberOfNodes < 2)
+        return FALSE;
+
+    if (!TreeNew_GetSortKeys(Manager->Handle, &sortKeys) || sortKeys.Count == 0)
+        return FALSE;
+
+    memset(&sortContext, 0, sizeof(PH_CM_MULTI_SORT_CONTEXT));
+    sortContext.PostSortFunction = Manager->PostSortFunction;
+    sortContext.PrimarySortOrder = sortKeys.Keys[0].Order;
+
+    for (i = 0; i < sortKeys.Count; i++)
+    {
+        ULONG columnId = sortKeys.Keys[i].Column;
+        PPH_CM_SORT_KEY key = &sortContext.Keys[sortContext.NumberOfKeys];
+
+        if (sortKeys.Keys[i].Order == NoSortOrder)
+            continue;
+
+        if (columnId < Manager->MinId)
+        {
+            if (columnId >= Manager->NumberOfSortFunctions || !Manager->SortFunctions[columnId])
+                continue;
+
+            key->CompareFunction = Manager->SortFunctions[columnId];
+            key->CompareContext = Manager->SortContext;
+        }
+        else
+        {
+            PH_TREENEW_COLUMN tnColumn;
+            PPH_CM_COLUMN column;
+
+            if (!TreeNew_GetColumn(Manager->Handle, columnId, &tnColumn))
+                continue;
+            if (!(column = tnColumn.Context) || !column->SortFunction)
+                continue;
+
+            key->PluginSortFunction = (PPH_PLUGIN_TREENEW_SORT_FUNCTION)column->SortFunction;
+            key->SubId = column->SubId;
+            key->PluginContext = column->Context;
+        }
+
+        key->SortOrder = sortKeys.Keys[i].Order;
+        sortContext.NumberOfKeys++;
+    }
+
+    if (sortContext.NumberOfKeys == 0)
+        return FALSE;
+
+    qsort_s(Nodes, NumberOfNodes, sizeof(PVOID), PhCmpMultiSortFunction, &sortContext);
+
+    return TRUE;
+}
+
+/**
  * Loads and applies column settings to a TreeNew control.
  *
  * \param TreeNewHandle A handle to the TreeNew control window.
@@ -612,48 +763,65 @@ CleanupExit:
         PhDereferenceObject(columnHashtable);
     }
 
-    // Load sort settings.
+    // Load sort settings. Format: "col,order[|col,order...]" (primary key first).
 
     if (SortSettings && SortSettings->Length != 0)
     {
-        PhSplitStringRefAtChar(SortSettings, L',', &valuePart, &subPart);
+        PH_STRINGREF remainingPart = *SortSettings;
+        PH_STRINGREF keyPart;
+        PH_TREENEW_SORT_KEYS sortKeys;
 
-        if (valuePart.Length != 0 && subPart.Length != 0)
+        memset(&sortKeys, 0, sizeof(PH_TREENEW_SORT_KEYS));
+
+        while (remainingPart.Length != 0 && sortKeys.Count < PH_TREENEW_MAX_SORT_KEYS)
         {
-            ULONG sortColumn;
-            PH_SORT_ORDER sortOrder;
+            PhSplitStringRefAtChar(&remainingPart, L'|', &keyPart, &remainingPart);
+            PhSplitStringRefAtChar(&keyPart, L',', &valuePart, &subPart);
 
-            sortColumn = ULONG_MAX;
-
-            if (valuePart.Buffer[0] == L'+')
+            if (valuePart.Length != 0 && subPart.Length != 0)
             {
-                PH_STRINGREF pluginName;
-                ULONG subId;
-                PPH_CM_COLUMN cmColumn;
+                ULONG sortColumn;
+                PH_SORT_ORDER sortOrder;
 
-                if (
-                    Manager &&
-                    PhEmParseCompoundId(&valuePart, &pluginName, &subId) &&
-                    (cmColumn = PhCmFindColumn(Manager, &pluginName, subId))
-                    )
+                sortColumn = ULONG_MAX;
+
+                if (valuePart.Buffer[0] == L'+')
                 {
-                    sortColumn = cmColumn->Id;
+                    PH_STRINGREF pluginName;
+                    ULONG subId;
+                    PPH_CM_COLUMN cmColumn;
+
+                    if (
+                        Manager &&
+                        PhEmParseCompoundId(&valuePart, &pluginName, &subId) &&
+                        (cmColumn = PhCmFindColumn(Manager, &pluginName, subId))
+                        )
+                    {
+                        sortColumn = cmColumn->Id;
+                    }
+                }
+                else
+                {
+                    PhStringToUInt64(&valuePart, 10, &integer);
+                    sortColumn = (ULONG)integer;
+                }
+
+                PhStringToUInt64(&subPart, 10, &integer);
+                sortOrder = (PH_SORT_ORDER)integer;
+
+                if (sortColumn != ULONG_MAX && sortOrder <= DescendingSortOrder)
+                {
+                    sortKeys.Keys[sortKeys.Count].Column = sortColumn;
+                    sortKeys.Keys[sortKeys.Count].Order = sortOrder;
+                    sortKeys.Count++;
                 }
             }
-            else
-            {
-                PhStringToUInt64(&valuePart, 10, &integer);
-                sortColumn = (ULONG)integer;
-            }
-
-            PhStringToUInt64(&subPart, 10, &integer);
-            sortOrder = (PH_SORT_ORDER)integer;
-
-            if (sortColumn != ULONG_MAX && sortOrder <= DescendingSortOrder)
-            {
-                TreeNew_SetSort(TreeNewHandle, sortColumn, sortOrder);
-            }
         }
+
+        if (sortKeys.Count == 1)
+            TreeNew_SetSort(TreeNewHandle, sortKeys.Keys[0].Column, sortKeys.Keys[0].Order);
+        else if (sortKeys.Count > 1)
+            TreeNew_SetSortKeys(TreeNewHandle, &sortKeys);
     }
 
     return result;
@@ -837,48 +1005,39 @@ PPH_STRING PhCmSaveSettingsEx(
 
     if (SortSettings)
     {
-        ULONG sortColumn;
-        PH_SORT_ORDER sortOrder;
+        PH_TREENEW_SORT_KEYS sortKeys;
 
-        if (TreeNew_GetSort(TreeNewHandle, &sortColumn, &sortOrder))
+        if (TreeNew_GetSortKeys(TreeNewHandle, &sortKeys))
         {
-            if (sortOrder != NoSortOrder)
+            if (sortKeys.Count != 0)
             {
-                if (!Manager || sortColumn < Manager->MinId)
-                {
-                    PH_FORMAT format[3];
+                PH_STRING_BUILDER sortBuilder;
 
-                    // %lu,%lu
-                    PhInitFormatU(&format[0], sortColumn);
-                    PhInitFormatC(&format[1], L',');
-                    PhInitFormatU(&format[2], sortOrder);
+                PhInitializeStringBuilder(&sortBuilder, 32);
 
-                    *SortSettings = PhFormat(format, RTL_NUMBER_OF(format), 32);
-                }
-                else
+                for (ULONG k = 0; k < sortKeys.Count; k++)
                 {
-                    if (TreeNew_GetColumn(TreeNewHandle, sortColumn, &column))
+                    ULONG sortColumn = sortKeys.Keys[k].Column;
+                    PH_SORT_ORDER sortOrder = sortKeys.Keys[k].Order;
+
+                    if (!Manager || sortColumn < Manager->MinId)
                     {
-                        PPH_CM_COLUMN cmColumn;
-                        PH_FORMAT format[6];
-
-                        cmColumn = column.Context;
-
-                        // +%s+%lu,%lu
-                        PhInitFormatC(&format[0], L'+');
-                        PhInitFormatSR(&format[1], cmColumn->Plugin->Name);
-                        PhInitFormatC(&format[2], L'+');
-                        PhInitFormatU(&format[3], cmColumn->SubId);
-                        PhInitFormatC(&format[4], L',');
-                        PhInitFormatU(&format[5], sortOrder);
-
-                        *SortSettings = PhFormat(format, RTL_NUMBER_OF(format), 64);
+                        PhAppendFormatStringBuilder(&sortBuilder, L"%lu,%lu|", sortColumn, (ULONG)sortOrder);
                     }
-                    else
+                    else if (TreeNew_GetColumn(TreeNewHandle, sortColumn, &column))
                     {
-                        *SortSettings = PhReferenceEmptyString();
+                        PPH_CM_COLUMN cmColumn = column.Context;
+
+                        PhAppendCharStringBuilder(&sortBuilder, L'+');
+                        PhAppendStringBuilder(&sortBuilder, &cmColumn->Plugin->Name);
+                        PhAppendFormatStringBuilder(&sortBuilder, L"+%lu,%lu|", cmColumn->SubId, (ULONG)sortOrder);
                     }
                 }
+
+                if (sortBuilder.String->Length != 0)
+                    PhRemoveEndStringBuilder(&sortBuilder, 1);
+
+                *SortSettings = PhFinalStringBuilderString(&sortBuilder);
             }
             else
             {

@@ -390,10 +390,26 @@ typedef struct _PH_TREENEW_KEY_EVENT
     ULONG Data;
 } PH_TREENEW_KEY_EVENT, *PPH_TREENEW_KEY_EVENT;
 
+#define PH_TREENEW_MAX_SORT_KEYS 8
+
+typedef struct _PH_TREENEW_SORT_KEY
+{
+    ULONG Column;
+    PH_SORT_ORDER Order;
+} PH_TREENEW_SORT_KEY, *PPH_TREENEW_SORT_KEY;
+
+typedef struct _PH_TREENEW_SORT_KEYS
+{
+    ULONG Count; // Keys[0] is the primary sort key.
+    PH_TREENEW_SORT_KEY Keys[PH_TREENEW_MAX_SORT_KEYS];
+} PH_TREENEW_SORT_KEYS, *PPH_TREENEW_SORT_KEYS;
+
 typedef struct _PH_TREENEW_SORT_CHANGED_EVENT
 {
     ULONG SortColumn;
     PH_SORT_ORDER SortOrder;
+    ULONG NumberOfKeys; // Includes the primary key.
+    PPH_TREENEW_SORT_KEY Keys; // Valid only for the duration of the callback.
 } PH_TREENEW_SORT_CHANGED_EVENT, *PPH_TREENEW_SORT_CHANGED_EVENT;
 
 typedef struct _PH_TREENEW_NODE_EVENT
@@ -529,7 +545,9 @@ typedef struct _PH_TREENEW_GET_CELL_PARTS
 #define TNM_GETCELLPARTS (WM_USER + 56)
 #define TNM_SETSTYLEFLAGS (WM_USER + 57)
 #define TNM_GETSELECTEDNODES (WM_USER + 58)
-#define TNM_LAST (WM_USER + 58)
+#define TNM_GETSORTKEYS (WM_USER + 59)
+#define TNM_SETSORTKEYS (WM_USER + 60)
+#define TNM_LAST (WM_USER + 60)
 
 typedef struct _PH_TREENEW_SELECTED_NODES
 {
@@ -584,6 +602,12 @@ EXTERN_C LRESULT PhTnSendMessage(
 
 #define TreeNew_SetSort(hWnd, Column, Order) \
     PhTnSendMessage((hWnd), TNM_SETSORT, (WPARAM)(Column), (LPARAM)(Order))
+
+#define TreeNew_GetSortKeys(hWnd, SortKeys) \
+    PhTnSendMessage((hWnd), TNM_GETSORTKEYS, 0, (LPARAM)(SortKeys))
+
+#define TreeNew_SetSortKeys(hWnd, SortKeys) \
+    PhTnSendMessage((hWnd), TNM_SETSORTKEYS, 0, (LPARAM)(SortKeys))
 
 #define TreeNew_SetTriState(hWnd, TriState) \
     PhTnSendMessage((hWnd), TNM_SETTRISTATE, (WPARAM)(TriState), 0)
@@ -751,6 +775,12 @@ EXTERN_C LRESULT PhTnSendMessage(
 
 #define TreeNew_SetSort(hWnd, Column, Order) \
     SendMessage((hWnd), TNM_SETSORT, (WPARAM)(Column), (LPARAM)(Order))
+
+#define TreeNew_GetSortKeys(hWnd, SortKeys) \
+    SendMessage((hWnd), TNM_GETSORTKEYS, 0, (LPARAM)(SortKeys))
+
+#define TreeNew_SetSortKeys(hWnd, SortKeys) \
+    SendMessage((hWnd), TNM_SETSORTKEYS, 0, (LPARAM)(SortKeys))
 
 #define TreeNew_SetTriState(hWnd, TriState) \
     SendMessage((hWnd), TNM_SETTRISTATE, (WPARAM)(TriState), 0)

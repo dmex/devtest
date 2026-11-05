@@ -2410,7 +2410,7 @@ BOOLEAN PhTnpOnNotify(
                 if (Header_GetItem(Header->hwndFrom, nmHeader->iItem, &item))
                 {
                     column = (PPH_TREENEW_COLUMN)item.lParam;
-                    PhTnpProcessSortColumn(Context, column);
+                    PhTnpProcessSortColumnEx(Context, column, GetKeyState(VK_SHIFT) < 0);
                 }
             }
         }
@@ -2800,11 +2800,11 @@ LRESULT PhTnpOnUserMessage(
         {
             ULONG sortColumn = (ULONG)WParam;
             PH_SORT_ORDER sortOrder = (PH_SORT_ORDER)LParam;
-            PH_TREENEW_SORT_CHANGED_EVENT sortOrderEvent;
             PPH_TREENEW_COLUMN column;
 
             if (sortColumn == Context->SortColumn &&
-                sortOrder == Context->SortOrder)
+                sortOrder == Context->SortOrder &&
+                Context->NumberOfSecondarySortKeys == 0)
             {
                 return TRUE; // Nothing to change (dmex)
             }
@@ -2822,14 +2822,71 @@ LRESULT PhTnpOnUserMessage(
 
             Context->SortColumn = sortColumn;
             Context->SortOrder = sortOrder;
+            Context->NumberOfSecondarySortKeys = 0;
 
             PhTnpSetColumnHeaderSortIcon(Context, column);
+            PhTnpNotifySortChanged(Context);
+        }
+        return TRUE;
+    case TNM_GETSORTKEYS:
+        {
+            PPH_TREENEW_SORT_KEYS sortKeys = (PPH_TREENEW_SORT_KEYS)LParam;
 
-            memset(&sortOrderEvent, 0, sizeof(PH_TREENEW_SORT_CHANGED_EVENT));
-            sortOrderEvent.SortColumn = sortColumn;
-            sortOrderEvent.SortOrder = sortOrder;
+            if (!sortKeys)
+                return FALSE;
 
-            Context->Callback(Context->Handle, TreeNewSortChanged, &sortOrderEvent, NULL, Context->CallbackContext);
+            PhTnpGetSortKeys(Context, sortKeys);
+        }
+        return TRUE;
+    case TNM_SETSORTKEYS:
+        {
+            PPH_TREENEW_SORT_KEYS sortKeys = (PPH_TREENEW_SORT_KEYS)LParam;
+            ULONG count = 0;
+            ULONG i;
+            ULONG j;
+
+            if (!sortKeys || sortKeys->Count > PH_TREENEW_MAX_SORT_KEYS)
+                return FALSE;
+
+            Context->SortColumn = 0;
+            Context->SortOrder = NoSortOrder;
+            Context->NumberOfSecondarySortKeys = 0;
+
+            for (i = 0; i < sortKeys->Count; i++)
+            {
+                PH_TREENEW_SORT_KEY key = sortKeys->Keys[i];
+                BOOLEAN duplicate = FALSE;
+
+                if (key.Order == NoSortOrder || !PhTnpLookupColumnById(Context, key.Column))
+                    continue;
+
+                if (count != 0 && key.Column == Context->SortColumn)
+                    duplicate = TRUE;
+
+                for (j = 0; j < Context->NumberOfSecondarySortKeys; j++)
+                {
+                    if (Context->SecondarySortKeys[j].Column == key.Column)
+                        duplicate = TRUE;
+                }
+
+                if (duplicate)
+                    continue;
+
+                if (count == 0)
+                {
+                    Context->SortColumn = key.Column;
+                    Context->SortOrder = key.Order;
+                }
+                else
+                {
+                    Context->SecondarySortKeys[Context->NumberOfSecondarySortKeys++] = key;
+                }
+
+                count++;
+            }
+
+            PhTnpSetColumnHeaderSortIcon(Context, NULL);
+            PhTnpNotifySortChanged(Context);
         }
         return TRUE;
     case TNM_SETTRISTATE:
@@ -4283,6 +4340,8 @@ BOOLEAN PhTnpRemoveColumn(
     if (!(realColumn = PhTnpLookupColumnById(Context, Id)))
         return FALSE;
 
+    PhTnpRemoveSortKey(Context, Id);
+
     updateLayout = FALSE;
 
     if (realColumn->Visible)
@@ -4643,11 +4702,12 @@ LONG PhTnpInsertColumnHeader(
     else
         item.fmt |= HDF_CENTER;
 
-    if (Column->Id == Context->SortColumn)
     {
-        if (Context->SortOrder == AscendingSortOrder)
+        PH_SORT_ORDER columnSortOrder = PhTnpGetColumnSortOrder(Context, Column->Id);
+
+        if (columnSortOrder == AscendingSortOrder)
             item.fmt |= HDF_SORTUP;
-        else if (Context->SortOrder == DescendingSortOrder)
+        else if (columnSortOrder == DescendingSortOrder)
             item.fmt |= HDF_SORTDOWN;
     }
 
@@ -4704,11 +4764,12 @@ VOID PhTnpChangeColumnHeader(
         else
             item.fmt |= HDF_CENTER;
 
-        if (Column->Id == Context->SortColumn)
         {
-            if (Context->SortOrder == AscendingSortOrder)
+            PH_SORT_ORDER columnSortOrder = PhTnpGetColumnSortOrder(Context, Column->Id);
+
+            if (columnSortOrder == AscendingSortOrder)
                 item.fmt |= HDF_SORTUP;
-            else if (Context->SortOrder == DescendingSortOrder)
+            else if (columnSortOrder == DescendingSortOrder)
                 item.fmt |= HDF_SORTDOWN;
         }
     }
@@ -4981,7 +5042,50 @@ VOID PhTnpProcessResizeColumn(
 }
 
 /**
- * Processes a column sort operation.
+ * Computes the next sort order for a column that is clicked again.
+ */
+static PH_SORT_ORDER PhTnpCycleSortOrder(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _In_ PPH_TREENEW_COLUMN Column,
+    _In_ PH_SORT_ORDER SortOrder
+    )
+{
+    if (Context->TriState)
+    {
+        if (!Column->SortDescending)
+        {
+            // Ascending -> Descending -> None
+
+            if (SortOrder == AscendingSortOrder)
+                return DescendingSortOrder;
+            else if (SortOrder == DescendingSortOrder)
+                return NoSortOrder;
+            else
+                return AscendingSortOrder;
+        }
+        else
+        {
+            // Descending -> Ascending -> None
+
+            if (SortOrder == DescendingSortOrder)
+                return AscendingSortOrder;
+            else if (SortOrder == AscendingSortOrder)
+                return NoSortOrder;
+            else
+                return DescendingSortOrder;
+        }
+    }
+    else
+    {
+        if (SortOrder == AscendingSortOrder)
+            return DescendingSortOrder;
+        else
+            return AscendingSortOrder;
+    }
+}
+
+/**
+ * Processes a click on a column header to change sorting.
  *
  * \param Context Pointer to the treenew context structure.
  * \param NewColumn Pointer to the column being sorted.
@@ -4991,124 +5095,265 @@ VOID PhTnpProcessSortColumn(
     _In_ PPH_TREENEW_COLUMN NewColumn
     )
 {
-    PH_TREENEW_SORT_CHANGED_EVENT sortOrderEvent;
+    PhTnpProcessSortColumnEx(Context, NewColumn, FALSE);
+}
 
-    if (NewColumn->Id == Context->SortColumn)
+/**
+ * Processes a click on a column header to change sorting.
+ *
+ * \param Context Pointer to the treenew context structure.
+ * \param NewColumn Pointer to the column being sorted.
+ * \param Additive TRUE to add/toggle the column as an additional sort key
+ * (Shift+click), FALSE to make it the only sort key.
+ */
+VOID PhTnpProcessSortColumnEx(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _In_ PPH_TREENEW_COLUMN NewColumn,
+    _In_ BOOLEAN Additive
+    )
+{
+    PH_SORT_ORDER defaultOrder = NewColumn->SortDescending ? DescendingSortOrder : AscendingSortOrder;
+    ULONG i;
+
+    if (!Additive || Context->SortOrder == NoSortOrder)
     {
-        if (Context->TriState)
+        if (NewColumn->Id == Context->SortColumn && Context->SortOrder != NoSortOrder)
         {
-            if (!NewColumn->SortDescending)
-            {
-                // Ascending -> Descending -> None
-
-                if (Context->SortOrder == AscendingSortOrder)
-                    Context->SortOrder = DescendingSortOrder;
-                else if (Context->SortOrder == DescendingSortOrder)
-                    Context->SortOrder = NoSortOrder;
-                else
-                    Context->SortOrder = AscendingSortOrder;
-            }
-            else
-            {
-                // Descending -> Ascending -> None
-
-                if (Context->SortOrder == DescendingSortOrder)
-                    Context->SortOrder = AscendingSortOrder;
-                else if (Context->SortOrder == AscendingSortOrder)
-                    Context->SortOrder = NoSortOrder;
-                else
-                    Context->SortOrder = DescendingSortOrder;
-            }
+            Context->SortOrder = PhTnpCycleSortOrder(Context, NewColumn, Context->SortOrder);
         }
         else
         {
-            if (Context->SortOrder == AscendingSortOrder)
-                Context->SortOrder = DescendingSortOrder;
-            else
-                Context->SortOrder = AscendingSortOrder;
+            Context->SortColumn = NewColumn->Id;
+            Context->SortOrder = defaultOrder;
         }
+
+        Context->NumberOfSecondarySortKeys = 0;
+    }
+    else if (NewColumn->Id == Context->SortColumn)
+    {
+        Context->SortOrder = PhTnpCycleSortOrder(Context, NewColumn, Context->SortOrder);
+
+        if (Context->SortOrder == NoSortOrder)
+            PhTnpRemoveSortKey(Context, NewColumn->Id);
     }
     else
     {
-        Context->SortColumn = NewColumn->Id;
+        for (i = 0; i < Context->NumberOfSecondarySortKeys; i++)
+        {
+            if (Context->SecondarySortKeys[i].Column == NewColumn->Id)
+                break;
+        }
 
-        if (!NewColumn->SortDescending)
-            Context->SortOrder = AscendingSortOrder;
+        if (i < Context->NumberOfSecondarySortKeys)
+        {
+            PH_SORT_ORDER order = Context->SecondarySortKeys[i].Order;
+
+            // Secondary keys always cycle back to "none" so they can be removed.
+            if (order == defaultOrder)
+                Context->SecondarySortKeys[i].Order = order == AscendingSortOrder ? DescendingSortOrder : AscendingSortOrder;
+            else
+                PhTnpRemoveSortKey(Context, NewColumn->Id);
+        }
+        else if (Context->NumberOfSecondarySortKeys < RTL_NUMBER_OF(Context->SecondarySortKeys))
+        {
+            Context->SecondarySortKeys[Context->NumberOfSecondarySortKeys].Column = NewColumn->Id;
+            Context->SecondarySortKeys[Context->NumberOfSecondarySortKeys].Order = defaultOrder;
+            Context->NumberOfSecondarySortKeys++;
+        }
         else
-            Context->SortOrder = DescendingSortOrder;
+        {
+            return; // Key limit reached.
+        }
     }
 
-    PhTnpSetColumnHeaderSortIcon(Context, NewColumn);
+    PhTnpSetColumnHeaderSortIcon(Context, NULL);
+    PhTnpNotifySortChanged(Context);
+}
+
+/**
+ * Gets the sort order of a column, considering all sort keys.
+ *
+ * \param Context Pointer to the treenew context structure.
+ * \param Id The column ID.
+ * \return The sort order of the column, or NoSortOrder if the column is not a sort key.
+ */
+PH_SORT_ORDER PhTnpGetColumnSortOrder(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _In_ ULONG Id
+    )
+{
+    ULONG i;
+
+    if (Context->SortOrder == NoSortOrder)
+        return NoSortOrder;
+
+    if (Id == Context->SortColumn)
+        return Context->SortOrder;
+
+    for (i = 0; i < Context->NumberOfSecondarySortKeys; i++)
+    {
+        if (Context->SecondarySortKeys[i].Column == Id)
+            return Context->SecondarySortKeys[i].Order;
+    }
+
+    return NoSortOrder;
+}
+
+/**
+ * Copies all sort keys (primary first) into a caller-supplied structure.
+ */
+VOID PhTnpGetSortKeys(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _Out_ PPH_TREENEW_SORT_KEYS SortKeys
+    )
+{
+    ULONG i;
+
+    memset(SortKeys, 0, sizeof(PH_TREENEW_SORT_KEYS));
+
+    if (Context->SortOrder == NoSortOrder)
+        return;
+
+    SortKeys->Keys[0].Column = Context->SortColumn;
+    SortKeys->Keys[0].Order = Context->SortOrder;
+    SortKeys->Count = 1;
+
+    for (i = 0; i < Context->NumberOfSecondarySortKeys; i++)
+        SortKeys->Keys[SortKeys->Count++] = Context->SecondarySortKeys[i];
+}
+
+/**
+ * Sends TreeNewSortChanged with the current sort keys.
+ */
+VOID PhTnpNotifySortChanged(
+    _In_ PPH_TREENEW_CONTEXT Context
+    )
+{
+    PH_TREENEW_SORT_CHANGED_EVENT sortOrderEvent;
+    PH_TREENEW_SORT_KEYS sortKeys;
+
+    PhTnpGetSortKeys(Context, &sortKeys);
 
     memset(&sortOrderEvent, 0, sizeof(PH_TREENEW_SORT_CHANGED_EVENT));
     sortOrderEvent.SortColumn = Context->SortColumn;
     sortOrderEvent.SortOrder = Context->SortOrder;
+    sortOrderEvent.NumberOfKeys = sortKeys.Count;
+    sortOrderEvent.Keys = sortKeys.Keys;
 
     Context->Callback(Context->Handle, TreeNewSortChanged, &sortOrderEvent, NULL, Context->CallbackContext);
 }
 
 /**
- * Sets the sort icon on a column header.
+ * Removes a column from the sort keys. If it is the primary key, the
+ * first secondary key (if any) is promoted. Does not send notifications.
+ */
+VOID PhTnpRemoveSortKey(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _In_ ULONG Id
+    )
+{
+    ULONG i;
+
+    if (Context->SortOrder != NoSortOrder && Context->SortColumn == Id)
+    {
+        if (Context->NumberOfSecondarySortKeys != 0)
+        {
+            Context->SortColumn = Context->SecondarySortKeys[0].Column;
+            Context->SortOrder = Context->SecondarySortKeys[0].Order;
+            Id = Context->SortColumn; // remove the promoted entry below
+        }
+        else
+        {
+            Context->SortOrder = NoSortOrder;
+            return;
+        }
+    }
+
+    for (i = 0; i < Context->NumberOfSecondarySortKeys; i++)
+    {
+        if (Context->SecondarySortKeys[i].Column == Id)
+        {
+            memmove(
+                &Context->SecondarySortKeys[i],
+                &Context->SecondarySortKeys[i + 1],
+                (Context->NumberOfSecondarySortKeys - i - 1) * sizeof(PH_TREENEW_SORT_KEY)
+                );
+            Context->NumberOfSecondarySortKeys--;
+            break;
+        }
+    }
+}
+
+/**
+ * Sets the sort icons on the column headers for all sort keys.
  *
  * \param Context Pointer to the treenew context structure.
- * \param SortColumnPointer Pointer to the column being sorted, or NULL to look it up.
- * \return TRUE if the icon was set successfully, FALSE otherwise.
+ * \param SortColumnPointer Pointer to the primary sort column, or NULL to look it up.
+ * \return TRUE if the icons were set successfully, FALSE otherwise.
  */
 BOOLEAN PhTnpSetColumnHeaderSortIcon(
     _In_ PPH_TREENEW_CONTEXT Context,
     _In_opt_ PPH_TREENEW_COLUMN SortColumnPointer
     )
 {
-    if (Context->SortOrder == NoSortOrder)
-    {
-        PhSetHeaderSortIcon(
-            Context->FixedHeaderHandle,
-            -1,
-            NoSortOrder
-            );
-        PhSetHeaderSortIcon(
-            Context->HeaderHandle,
-            -1,
-            NoSortOrder
-            );
+    PH_TREENEW_SORT_KEYS sortKeys;
+    BOOLEAN result = TRUE;
+    ULONG i;
 
-        return TRUE;
+    PhSetHeaderSortIcon(Context->FixedHeaderHandle, -1, NoSortOrder);
+    PhSetHeaderSortIcon(Context->HeaderHandle, -1, NoSortOrder);
+
+    PhTnpGetSortKeys(Context, &sortKeys);
+
+    for (i = 0; i < sortKeys.Count; i++)
+    {
+        PPH_TREENEW_COLUMN column;
+        HWND headerHandle;
+        LONG index;
+        HDITEM item;
+
+        if (i == 0 && SortColumnPointer && SortColumnPointer->Id == sortKeys.Keys[0].Column)
+            column = SortColumnPointer;
+        else
+            column = PhTnpLookupColumnById(Context, sortKeys.Keys[i].Column);
+
+        if (!column)
+        {
+            if (i == 0)
+                result = FALSE;
+            continue;
+        }
+
+        if (!column->Visible)
+            continue;
+
+        if (column->Fixed)
+        {
+            headerHandle = Context->FixedHeaderHandle;
+            index = 0;
+        }
+        else
+        {
+            headerHandle = Context->HeaderHandle;
+            index = column->s.ViewIndex;
+        }
+
+        item.mask = HDI_FORMAT;
+
+        if (!Header_GetItem(headerHandle, index, &item))
+            continue;
+
+        item.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN);
+
+        if (sortKeys.Keys[i].Order == AscendingSortOrder)
+            item.fmt |= HDF_SORTUP;
+        else if (sortKeys.Keys[i].Order == DescendingSortOrder)
+            item.fmt |= HDF_SORTDOWN;
+
+        Header_SetItem(headerHandle, index, &item);
     }
 
-    if (!SortColumnPointer)
-    {
-        if (!(SortColumnPointer = PhTnpLookupColumnById(Context, Context->SortColumn)))
-            return FALSE;
-    }
-
-    if (SortColumnPointer->Fixed)
-    {
-        PhSetHeaderSortIcon(
-            Context->FixedHeaderHandle,
-            0,
-            Context->SortOrder
-            );
-        PhSetHeaderSortIcon(
-            Context->HeaderHandle,
-            -1,
-            NoSortOrder
-            );
-    }
-    else
-    {
-        PhSetHeaderSortIcon(
-            Context->FixedHeaderHandle,
-            -1,
-            NoSortOrder
-            );
-        PhSetHeaderSortIcon(
-            Context->HeaderHandle,
-            SortColumnPointer->s.ViewIndex,
-            Context->SortOrder
-            );
-    }
-
-    return TRUE;
+    return result;
 }
 
 /**
@@ -9391,11 +9636,12 @@ BOOLEAN TnHeaderCustomPaint(
         else
             SetFlag(fmt, HDF_CENTER);
 
-        if (column->Id == Context->SortColumn)
         {
-            if (Context->SortOrder == AscendingSortOrder)
+            PH_SORT_ORDER columnSortOrder = PhTnpGetColumnSortOrder(Context, column->Id);
+
+            if (columnSortOrder == AscendingSortOrder)
                 SetFlag(fmt, HDF_SORTUP);
-            else if (Context->SortOrder == DescendingSortOrder)
+            else if (columnSortOrder == DescendingSortOrder)
                 SetFlag(fmt, HDF_SORTDOWN);
 
             if (FlagOn(fmt, HDF_SORTDOWN))

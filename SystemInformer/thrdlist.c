@@ -964,24 +964,26 @@ VOID PhpUpdateThreadNodeKernelStackSize(
 }
 
 #define SORT_FUNCTION(Column) PhpThreadTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpThreadTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpThreadTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PPH_THREAD_LIST_CONTEXT context = (PPH_THREAD_LIST_CONTEXT)_context; \
-    PPH_THREAD_NODE node1 = *(PPH_THREAD_NODE *)_elem1; \
-    PPH_THREAD_NODE node2 = *(PPH_THREAD_NODE *)_elem2; \
+    PPH_THREAD_NODE node1 = (PPH_THREAD_NODE)_node1; \
+    PPH_THREAD_NODE node2 = (PPH_THREAD_NODE)_node2; \
     PPH_THREAD_ITEM threadItem1 = node1->ThreadItem; \
     PPH_THREAD_ITEM threadItem2 = node2->ThreadItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(context); \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. Direction and the tie-breaker are
+// applied by PhCmSortNodes (see the post-sort function).
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)node1->ThreadId, (ULONG_PTR)node2->ThreadId); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
 
 _Function_class_(PH_CM_POST_SORT_FUNCTION)
@@ -1018,8 +1020,10 @@ BEGIN_SORT_FUNCTION(Cpu)
     {
         sortResult = PhCompareTreeNewBlankCpuSortOrder(node1, node2);
 
+        // Keep the display order regardless of direction: PhCmSortNodes
+        // applies PhModifySort again, which cancels this out.
         if (sortResult != 0)
-            return sortResult;
+            return PhModifySort(sortResult, sortOrder);
     }
 
     if (sortResult == 0 && cpuUsage1 != 0)
@@ -1055,7 +1059,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Service)
 {
-    sortResult = PhCompareStringWithNullSortOrder(threadItem1->ServiceName, threadItem2->ServiceName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(threadItem1->ServiceName, threadItem2->ServiceName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1064,7 +1068,7 @@ BEGIN_SORT_FUNCTION(Name)
     PhpUpdateThreadNodeNameText(node1);
     PhpUpdateThreadNodeNameText(node2);
 
-    sortResult = PhCompareStringWithNullSortOrder(node1->NameText, node2->NameText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->NameText, node2->NameText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1076,7 +1080,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(StartModule)
 {
-    sortResult = PhCompareStringWithNullSortOrder(threadItem1->StartAddressWin32FileName, threadItem2->StartAddressWin32FileName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(threadItem1->StartAddressWin32FileName, threadItem2->StartAddressWin32FileName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1223,8 +1227,10 @@ BEGIN_SORT_FUNCTION(CpuCore)
     {
         sortResult = PhCompareTreeNewBlankCpuSortOrder(node1, node2);
 
+        // Keep the display order regardless of direction: PhCmSortNodes
+        // applies PhModifySort again, which cancels this out.
         if (sortResult != 0)
-            return sortResult;
+            return PhModifySort(sortResult, sortOrder);
     }
 
     sortResult = singlecmp(cpuUsage1, cpuUsage2);
@@ -1318,8 +1324,10 @@ BEGIN_SORT_FUNCTION(CpuUser)
     {
         sortResult = PhCompareTreeNewBlankCpuSortOrder(node1, node2);
 
+        // Keep the display order regardless of direction: PhCmSortNodes
+        // applies PhModifySort again, which cancels this out.
         if (sortResult != 0)
-            return sortResult;
+            return PhModifySort(sortResult, sortOrder);
     }
 
     sortResult = singlecmp(cpuUsage1, cpuUsage2);
@@ -1335,8 +1343,10 @@ BEGIN_SORT_FUNCTION(CpuKernel)
     {
         sortResult = PhCompareTreeNewBlankCpuSortOrder(node1, node2);
 
+        // Keep the display order regardless of direction: PhCmSortNodes
+        // applies PhModifySort again, which cancels this out.
         if (sortResult != 0)
-            return sortResult;
+            return PhModifySort(sortResult, sortOrder);
     }
 
     sortResult = singlecmp(cpuUsage1, cpuUsage2);
@@ -1458,7 +1468,7 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_CM_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Tid),
                     SORT_FUNCTION(Cpu),
@@ -1509,32 +1519,13 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                     SORT_FUNCTION(HasRpc),
                     SORT_FUNCTION(ActualBasePriority),
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PH_THREAD_TREELIST_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (!PhCmForwardSort(
-                    (PPH_TREENEW_NODE *)context->NodeList->Items,
-                    context->NodeList->Count,
-                    context->TreeNewSortColumn,
-                    context->TreeNewSortOrder,
-                    &context->Cm
-                    ))
-                {
-                    if (context->TreeNewSortColumn < PH_THREAD_TREELIST_COLUMN_MAXIMUM)
-                        sortFunction = sortFunctions[context->TreeNewSortColumn];
-                    else
-                        sortFunction = NULL;
-                }
-                else
-                {
-                    sortFunction = NULL;
-                }
+                if (!context->Cm.SortFunctions)
+                    PhCmRegisterSortFunctions(&context->Cm, sortFunctions, RTL_NUMBER_OF(sortFunctions), context);
 
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhCmSortNodes(&context->Cm, (PPH_TREENEW_NODE *)context->NodeList->Items, context->NodeList->Count);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

@@ -183,6 +183,8 @@ typedef struct _PH_TREENEW_CONTEXT
 
     ULONG SortColumn; // ID of the column to sort by
     PH_SORT_ORDER SortOrder;
+    ULONG NumberOfSecondarySortKeys; // Additional sort keys (Shift+click)
+    PH_TREENEW_SORT_KEY SecondarySortKeys[PH_TREENEW_MAX_SORT_KEYS - 1];
 
     FLOAT VScrollRemainder;
     FLOAT HScrollRemainder;
@@ -704,6 +706,31 @@ VOID PhTnpProcessResizeColumn(
 VOID PhTnpProcessSortColumn(
     _In_ PPH_TREENEW_CONTEXT Context,
     _In_ PPH_TREENEW_COLUMN NewColumn
+    );
+
+VOID PhTnpProcessSortColumnEx(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _In_ PPH_TREENEW_COLUMN NewColumn,
+    _In_ BOOLEAN Additive
+    );
+
+PH_SORT_ORDER PhTnpGetColumnSortOrder(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _In_ ULONG Id
+    );
+
+VOID PhTnpGetSortKeys(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _Out_ PPH_TREENEW_SORT_KEYS SortKeys
+    );
+
+VOID PhTnpNotifySortChanged(
+    _In_ PPH_TREENEW_CONTEXT Context
+    );
+
+VOID PhTnpRemoveSortKey(
+    _In_ PPH_TREENEW_CONTEXT Context,
+    _In_ ULONG Id
     );
 
 BOOLEAN PhTnpSetColumnHeaderSortIcon(

@@ -24,6 +24,21 @@ LONG NTAPI PH_CM_POST_SORT_FUNCTION(
     _In_ PH_SORT_ORDER SortOrder
     );
 typedef PH_CM_POST_SORT_FUNCTION* PPH_CM_POST_SORT_FUNCTION;
+
+/**
+ * Compares two nodes for a single column. Returns the raw ascending result
+ * (negative, zero, positive) without applying the sort order and without a
+ * tie-breaker, so that further sort keys can be evaluated. SortOrder is the
+ * order of this key, for helpers such as PhCompareStringWithNullSortOrder.
+ */
+typedef _Function_class_(PH_CM_COMPARE_FUNCTION)
+LONG NTAPI PH_CM_COMPARE_FUNCTION(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    );
+typedef PH_CM_COMPARE_FUNCTION* PPH_CM_COMPARE_FUNCTION;
 // end_phapppub
 
 typedef struct _PH_CM_MANAGER
@@ -32,6 +47,9 @@ typedef struct _PH_CM_MANAGER
     ULONG MinId;
     ULONG NextId;
     PPH_CM_POST_SORT_FUNCTION PostSortFunction;
+    const PPH_CM_COMPARE_FUNCTION *SortFunctions; // Built-in column comparers, indexed by column ID.
+    ULONG NumberOfSortFunctions;
+    PVOID SortContext;
     LIST_ENTRY ColumnListHead;
     PPH_LIST NotifyList;
 } PH_CM_MANAGER, *PPH_CM_MANAGER;
@@ -94,6 +112,19 @@ BOOLEAN PhCmForwardSort(
     _In_ ULONG SortColumn,
     _In_ PH_SORT_ORDER SortOrder,
     _In_ PPH_CM_MANAGER Manager
+    );
+
+VOID PhCmRegisterSortFunctions(
+    _Inout_ PPH_CM_MANAGER Manager,
+    _In_reads_(NumberOfSortFunctions) const PPH_CM_COMPARE_FUNCTION *SortFunctions,
+    _In_ ULONG NumberOfSortFunctions,
+    _In_opt_ PVOID Context
+    );
+
+BOOLEAN PhCmSortNodes(
+    _In_ PPH_CM_MANAGER Manager,
+    _Inout_updates_(NumberOfNodes) PPH_TREENEW_NODE *Nodes,
+    _In_ ULONG NumberOfNodes
     );
 
 // begin_phapppub

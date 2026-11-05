@@ -389,24 +389,26 @@ VOID PhTickHandleNodes(
 }
 
 #define SORT_FUNCTION(Column) PhpHandleTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpHandleTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpHandleTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PPH_HANDLE_LIST_CONTEXT context = (PPH_HANDLE_LIST_CONTEXT)_context; \
-    PPH_HANDLE_NODE node1 = *(PPH_HANDLE_NODE *)_elem1; \
-    PPH_HANDLE_NODE node2 = *(PPH_HANDLE_NODE *)_elem2; \
+    PPH_HANDLE_NODE node1 = (PPH_HANDLE_NODE)_node1; \
+    PPH_HANDLE_NODE node2 = (PPH_HANDLE_NODE)_node2; \
     PPH_HANDLE_ITEM handleItem1 = node1->HandleItem; \
     PPH_HANDLE_ITEM handleItem2 = node2->HandleItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(context); \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. Direction and the tie-breaker are
+// applied by PhCmSortNodes (see the post-sort function).
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)node1->Handle, (ULONG_PTR)node2->Handle); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
 
 _Function_class_(PH_CM_POST_SORT_FUNCTION)
@@ -431,7 +433,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringWithNullSortOrder(handleItem1->BestObjectName, handleItem2->BestObjectName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(handleItem1->BestObjectName, handleItem2->BestObjectName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -461,7 +463,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(OriginalName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(handleItem1->ObjectName, handleItem2->ObjectName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(handleItem1->ObjectName, handleItem2->ObjectName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -521,7 +523,7 @@ BOOLEAN NTAPI PhpHandleTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_CM_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Type),
                     SORT_FUNCTION(Name),
@@ -538,32 +540,13 @@ BOOLEAN NTAPI PhpHandleTreeNewCallback(
                     SORT_FUNCTION(PagedPoolCharge),
                     SORT_FUNCTION(NonPagedPoolCharge),
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PHHNTLC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (!PhCmForwardSort(
-                    (PPH_TREENEW_NODE *)context->NodeList->Items,
-                    context->NodeList->Count,
-                    context->TreeNewSortColumn,
-                    context->TreeNewSortOrder,
-                    &context->Cm
-                    ))
-                {
-                    if (context->TreeNewSortColumn < PHHNTLC_MAXIMUM)
-                        sortFunction = sortFunctions[context->TreeNewSortColumn];
-                    else
-                        sortFunction = NULL;
-                }
-                else
-                {
-                    sortFunction = NULL;
-                }
+                if (!context->Cm.SortFunctions)
+                    PhCmRegisterSortFunctions(&context->Cm, sortFunctions, RTL_NUMBER_OF(sortFunctions), context);
 
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhCmSortNodes(&context->Cm, (PPH_TREENEW_NODE *)context->NodeList->Items, context->NodeList->Count);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;
