@@ -927,27 +927,6 @@ BEGIN_SORT_FUNCTION(Handle)
 }
 END_SORT_FUNCTION
 
-/**
- * qsort_s adapter for the unsorted parent/child view, which orders root windows by handle.
- */
-static int __cdecl WepWindowTreeNewCompareHandleUnsorted(
-    _In_ void *_context,
-    _In_ const void *_elem1,
-    _In_ const void *_elem2
-    )
-{
-    PVOID node1 = *(PVOID *)_elem1;
-    PVOID node2 = *(PVOID *)_elem2;
-    LONG result;
-
-    result = SORT_FUNCTION(Handle)(node1, node2, NoSortOrder, _context);
-
-    if (result == 0)
-        result = SORT_FUNCTION(TieBreak)(node1, node2, NoSortOrder, _context);
-
-    return result;
-}
-
 BEGIN_SORT_FUNCTION(Index)
 {
     sortResult = ushortcmp(node1->WindowIndex, node2->WindowIndex);
@@ -1021,11 +1000,19 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
 
                     if (context->ViewMode == WeWindowViewModeParentChild)
                     {
-                        qsort_s(
+                        PH_TREENEW_COMPARE_KEY key;
+
+                        // Root windows are ordered by handle.
+                        key.CompareFunction = SORT_FUNCTION(Handle);
+                        key.Context = context;
+                        key.SortOrder = NoSortOrder;
+
+                        PhTreeNewSortNodesEx(
                             context->NodeRootList->Items,
                             context->NodeRootList->Count,
-                            sizeof(PVOID),
-                            WepWindowTreeNewCompareHandleUnsorted,
+                            &key,
+                            1,
+                            SORT_FUNCTION(TieBreak),
                             context
                             );
                     }

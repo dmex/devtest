@@ -95,14 +95,6 @@ BOOLEAN PhCmForwardMessage(
     _In_ PPH_CM_MANAGER Manager
     );
 
-BOOLEAN PhCmForwardSort(
-    _In_ PPH_TREENEW_NODE *Nodes,
-    _In_ ULONG NumberOfNodes,
-    _In_ ULONG SortColumn,
-    _In_ PH_SORT_ORDER SortOrder,
-    _In_ PPH_CM_MANAGER Manager
-    );
-
 VOID PhCmRegisterSortFunctions(
     _Inout_ PPH_CM_MANAGER Manager,
     _In_reads_(NumberOfSortFunctions) const PPH_CM_COMPARE_FUNCTION *SortFunctions,
@@ -121,6 +113,15 @@ BOOLEAN PhCmSortNodesEx(
     _Inout_updates_(NumberOfNodes) PPH_TREENEW_NODE *Nodes,
     _In_ ULONG NumberOfNodes,
     _In_opt_ PPH_TREENEW_SORT_KEYS SortKeys
+    );
+
+VOID PhCmSortNodesByFunction(
+    _In_ PPH_CM_MANAGER Manager,
+    _Inout_updates_(NumberOfNodes) PPH_TREENEW_NODE *Nodes,
+    _In_ ULONG NumberOfNodes,
+    _In_ PPH_CM_COMPARE_FUNCTION CompareFunction,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
     );
 
 // begin_phapppub

@@ -35,7 +35,6 @@ typedef struct _DEVICE_TREE_SORT_CONTEXT
 {
     ULONG SortColumn;
     PH_SORT_ORDER SortOrder;
-    PH_TREENEW_SORT_KEYS SortKeys; // Keys used for sorting (primary first).
 } DEVICE_TREE_SORT_CONTEXT, *PDEVICE_TREE_SORT_CONTEXT;
 
 static BOOLEAN AutoRefreshDeviceTree = TRUE;
@@ -82,18 +81,21 @@ static PPH_TN_FILTER_ENTRY DeviceTreeFilterEntry = NULL;
 static PH_CALLBACK_REGISTRATION SearchChangedRegistration = { 0 };
 static PPH_POINTER_LIST DeviceNodeStateList = NULL;
 
-static int __cdecl DeviceListSortByNameFunction(
-    const void* Left,
-    const void* Right
+static LONG NTAPI DeviceListSortByNameFunction(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
     )
 {
-    PDEVICE_NODE lhsNode;
-    PDEVICE_NODE rhsNode;
+    PDEVICE_NODE lhsNode = Node1;
+    PDEVICE_NODE rhsNode = Node2;
     PPH_DEVICE_PROPERTY lhs;
     PPH_DEVICE_PROPERTY rhs;
 
-    lhsNode = *(PDEVICE_NODE*)Left;
-    rhsNode = *(PDEVICE_NODE*)Right;
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
     lhs = PhGetDeviceProperty(lhsNode->DeviceItem, PhDevicePropertyName);
     rhs = PhGetDeviceProperty(rhsNode->DeviceItem, PhDevicePropertyName);
 
@@ -240,7 +242,14 @@ PDEVICE_NODE DeviceTreeCreateNode(
 
     if (SortNameDevices)
     {
-        qsort(node->Children->Items, node->Children->Count, sizeof(PVOID), DeviceListSortByNameFunction);
+        PhTreeNewSortNodesEx(
+            node->Children->Items,
+            node->Children->Count,
+            NULL,
+            0,
+            DeviceListSortByNameFunction,
+            NULL
+            );
     }
 
     PhAddItemList(Nodes, node);
@@ -274,7 +283,14 @@ PDEVICE_TREE DeviceTreeCreate(
 
         if (SortNameDevices)
         {
-            qsort(tree->Roots->Items, tree->Roots->Count, sizeof(PVOID), DeviceListSortByNameFunction);
+            PhTreeNewSortNodesEx(
+                tree->Roots->Items,
+                tree->Roots->Count,
+                NULL,
+                0,
+                DeviceListSortByNameFunction,
+                NULL
+                );
         }
     }
 
@@ -557,50 +573,63 @@ static LONG DeviceTreeCompareProperty(
     return sortResult;
 }
 
-static int __cdecl DeviceTreeSortFunction(
-    void* Context,
-    const void* Left,
-    const void* Right
+/**
+ * Compares two device nodes by one property column.
+ *
+ * \param Context The property column, as a ULONG.
+ */
+static LONG NTAPI DeviceTreeCompareColumn(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
     )
 {
-    PDEVICE_TREE_SORT_CONTEXT context = Context;
-    PDEVICE_NODE lhsNode = *(PDEVICE_NODE*)Left;
-    PDEVICE_NODE rhsNode = *(PDEVICE_NODE*)Right;
-    PH_STRINGREF srl;
-    PH_STRINGREF srr;
-    LONG sortResult;
-    ULONG i;
+    UNREFERENCED_PARAMETER(SortOrder);
 
-    for (i = 0; i < context->SortKeys.Count; i++)
-    {
-        sortResult = DeviceTreeCompareProperty(lhsNode, rhsNode, context->SortKeys.Keys[i].Column);
-
-        if (sortResult != 0)
-            return PhModifySort(sortResult, context->SortKeys.Keys[i].Order);
-    }
-
-    // All keys are equal; break ties by name in the primary key's direction.
-    srl = PhGetStringRef(lhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
-    srr = PhGetStringRef(rhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
-    sortResult = PhCompareStringRef(&srl, &srr, TRUE);
-
-    return PhModifySort(sortResult, context->SortKeys.Keys[0].Order);
+    return DeviceTreeCompareProperty(Node1, Node2, PtrToUlong(Context));
 }
 
 /**
- * Fills in the sort keys of a sort context. Uses all of the control's sort
- * keys when the context matches the control's sort, otherwise the single
- * column chosen by the caller (in ascending order when the list is unsorted).
+ * Tie-breaker: compares two device nodes by name.
  */
-static VOID DeviceTreeInitializeSortKeys(
+static LONG NTAPI DeviceTreeCompareTieBreak(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PDEVICE_NODE lhsNode = Node1;
+    PDEVICE_NODE rhsNode = Node2;
+    PH_STRINGREF srl;
+    PH_STRINGREF srr;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    srl = PhGetStringRef(lhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
+    srr = PhGetStringRef(rhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
+
+    return PhCompareStringRef(&srl, &srr, TRUE);
+}
+
+/**
+ * Builds the compare keys for a sort. Uses all of the control's sort keys when
+ * the context matches the control's sort, otherwise the single column chosen by
+ * the caller (in ascending order when the list is unsorted).
+ *
+ * \return The number of keys written to Keys.
+ */
+static ULONG DeviceTreeGetCompareKeys(
     _In_ HWND TreeNewHandle,
-    _Inout_ PDEVICE_TREE_SORT_CONTEXT Context
+    _In_ PDEVICE_TREE_SORT_CONTEXT Context,
+    _Out_writes_(PH_TREENEW_MAX_SORT_KEYS) PPH_TREENEW_COMPARE_KEY Keys
     )
 {
     PH_TREENEW_SORT_KEYS sortKeys;
+    ULONG numberOfKeys = 0;
     ULONG i;
-
-    memset(&Context->SortKeys, 0, sizeof(PH_TREENEW_SORT_KEYS));
 
     if (
         Context->SortColumn == DeviceTreeSortColumn &&
@@ -624,8 +653,13 @@ static VOID DeviceTreeInitializeSortKeys(
         if (sortKeys.Keys[i].Order == NoSortOrder || sortKeys.Keys[i].Column >= PhMaxDeviceProperty)
             continue;
 
-        Context->SortKeys.Keys[Context->SortKeys.Count++] = sortKeys.Keys[i];
+        Keys[numberOfKeys].CompareFunction = DeviceTreeCompareColumn;
+        Keys[numberOfKeys].Context = UlongToPtr(sortKeys.Keys[i].Column);
+        Keys[numberOfKeys].SortOrder = sortKeys.Keys[i].Order;
+        numberOfKeys++;
     }
+
+    return numberOfKeys;
 }
 
 VOID DeviceNodeShowProperties(
@@ -785,16 +819,20 @@ BOOLEAN NTAPI DeviceTreeCallback(
 
                 if (sortList)
                 {
-                    DeviceTreeInitializeSortKeys(hwnd, &sortContext);
+                    PH_TREENEW_COMPARE_KEY keys[PH_TREENEW_MAX_SORT_KEYS];
+                    ULONG numberOfKeys;
 
-                    if (sortContext.SortKeys.Count != 0)
+                    numberOfKeys = DeviceTreeGetCompareKeys(hwnd, &sortContext, keys);
+
+                    if (numberOfKeys != 0)
                     {
-                        qsort_s(
+                        PhTreeNewSortNodesEx(
                             sortList->Items,
                             sortList->Count,
-                            sizeof(PVOID),
-                            DeviceTreeSortFunction,
-                            &sortContext
+                            keys,
+                            numberOfKeys,
+                            DeviceTreeCompareTieBreak,
+                            NULL
                             );
                     }
                 }

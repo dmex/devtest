@@ -16,33 +16,6 @@
 #include <extmgri.h>
 #include <phplug.h>
 
-typedef struct _PH_CM_SORT_CONTEXT
-{
-    PPH_PLUGIN_TREENEW_SORT_FUNCTION SortFunction;
-    ULONG SubId;
-    PVOID Context;
-    PPH_CM_POST_SORT_FUNCTION PostSortFunction;
-    PH_SORT_ORDER SortOrder;
-} PH_CM_SORT_CONTEXT, *PPH_CM_SORT_CONTEXT;
-
-typedef struct _PH_CM_SORT_KEY
-{
-    PPH_CM_COMPARE_FUNCTION CompareFunction; // Built-in column
-    PVOID CompareContext;
-    PPH_PLUGIN_TREENEW_SORT_FUNCTION PluginSortFunction; // Plugin column
-    ULONG SubId;
-    PVOID PluginContext;
-    PH_SORT_ORDER SortOrder;
-} PH_CM_SORT_KEY, *PPH_CM_SORT_KEY;
-
-typedef struct _PH_CM_MULTI_SORT_CONTEXT
-{
-    ULONG NumberOfKeys;
-    PH_CM_SORT_KEY Keys[PH_TREENEW_MAX_SORT_KEYS];
-    PPH_CM_POST_SORT_FUNCTION PostSortFunction;
-    PH_SORT_ORDER PrimarySortOrder;
-} PH_CM_MULTI_SORT_CONTEXT, *PPH_CM_MULTI_SORT_CONTEXT;
-
 /**
  * Initializes a column manager instance.
  *
@@ -322,76 +295,6 @@ BOOLEAN PhCmForwardMessage(
 }
 
 /**
- * Comparison function wrapper for sorting TreeNew nodes with plugin and post-sort callbacks.
- *
- * \param context A pointer to the PH_CM_SORT_CONTEXT structure.
- * \param elem1 A pointer to the first node element.
- * \param elem2 A pointer to the second node element.
- * \return int Negative if elem1 < elem2, zero if equal, positive if elem1 > elem2.
- */
-static int __cdecl PhCmpSortFunction(
-    _In_ void *context,
-    _In_ const void *elem1,
-    _In_ const void *elem2
-    )
-{
-    PPH_CM_SORT_CONTEXT sortContext = context;
-    PVOID node1 = *(PVOID *)elem1;
-    PVOID node2 = *(PVOID *)elem2;
-    LONG result;
-
-    result = sortContext->SortFunction(node1, node2, sortContext->SubId, sortContext->SortOrder, sortContext->Context);
-
-    return sortContext->PostSortFunction(result, node1, node2, sortContext->SortOrder);
-}
-
-/**
- * Sorts an array of TreeNew nodes using the sort function registered for a plugin column.
- *
- * \param Nodes An array of pointers to TreeNew nodes to sort.
- * \param NumberOfNodes The number of nodes in the array.
- * \param SortColumn The ID of the column being sorted.
- * \param SortOrder The sort order direction.
- * \param Manager A pointer to the column manager.
- * \return BOOLEAN TRUE if sorting was handled or bypassed, FALSE if SortColumn is not a plugin column.
- */
-BOOLEAN PhCmForwardSort(
-    _In_ PPH_TREENEW_NODE *Nodes,
-    _In_ ULONG NumberOfNodes,
-    _In_ ULONG SortColumn,
-    _In_ PH_SORT_ORDER SortOrder,
-    _In_ PPH_CM_MANAGER Manager
-    )
-{
-    PH_TREENEW_COLUMN tnColumn;
-    PPH_CM_COLUMN column;
-    PH_CM_SORT_CONTEXT sortContext;
-
-    if (SortColumn < Manager->MinId)
-        return FALSE;
-
-    if (!Manager->Handle)
-        return TRUE;
-
-    if (!TreeNew_GetColumn(Manager->Handle, SortColumn, &tnColumn))
-        return TRUE;
-
-    column = tnColumn.Context;
-
-    if (!column->SortFunction)
-        return TRUE;
-
-    sortContext.SortFunction = (PPH_PLUGIN_TREENEW_SORT_FUNCTION)column->SortFunction;
-    sortContext.SubId = column->SubId;
-    sortContext.Context = column->Context;
-    sortContext.PostSortFunction = Manager->PostSortFunction;
-    sortContext.SortOrder = SortOrder;
-    qsort_s(Nodes, NumberOfNodes, sizeof(PVOID), PhCmpSortFunction, &sortContext);
-
-    return TRUE;
-}
-
-/**
  * Registers the comparison functions for the built-in (non-plugin) columns of a
  * TreeNew control so that PhCmSortNodes can sort by multiple keys.
  *
@@ -413,37 +316,40 @@ VOID PhCmRegisterSortFunctions(
     Manager->SortContext = Context;
 }
 
-static int __cdecl PhCmpMultiSortFunction(
-    _In_ void *context,
-    _In_ const void *elem1,
-    _In_ const void *elem2
+/**
+ * Compares two nodes using a plugin column's sort function.
+ *
+ * \param Context The PH_CM_COLUMN of the plugin column.
+ */
+static LONG NTAPI PhCmpPluginColumnCompare(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
     )
 {
-    PPH_CM_MULTI_SORT_CONTEXT sortContext = context;
-    PVOID node1 = *(PVOID *)elem1;
-    PVOID node2 = *(PVOID *)elem2;
-    LONG result = 0;
-    ULONG i;
+    PPH_CM_COLUMN column = Context;
 
-    for (i = 0; i < sortContext->NumberOfKeys; i++)
-    {
-        PPH_CM_SORT_KEY key = &sortContext->Keys[i];
+    return ((PPH_PLUGIN_TREENEW_SORT_FUNCTION)column->SortFunction)(Node1, Node2, column->SubId, SortOrder, column->Context);
+}
 
-        if (key->CompareFunction)
-            result = key->CompareFunction(node1, node2, key->SortOrder, key->CompareContext);
-        else
-            result = key->PluginSortFunction(node1, node2, key->SubId, key->SortOrder, key->PluginContext);
+/**
+ * Tie-breaker that uses the manager's post-sort function. The post-sort function
+ * applies the sort order itself, so it is applied again here to return the raw
+ * result; PhTreeNewSortNodesEx then applies the order once.
+ *
+ * \param Context The PH_CM_MANAGER.
+ */
+static LONG NTAPI PhCmpPostSortTieBreak(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PPH_CM_MANAGER manager = Context;
 
-        if (result != 0)
-            return PhModifySort(result, key->SortOrder);
-    }
-
-    // All keys are equal; use the list's stable tie-breaker. The post-sort
-    // function applies the order itself, so pass the primary key's order.
-    if (sortContext->PostSortFunction)
-        return sortContext->PostSortFunction(0, node1, node2, sortContext->PrimarySortOrder);
-
-    return 0;
+    return PhModifySort(manager->PostSortFunction(0, Node1, Node2, SortOrder), SortOrder);
 }
 
 /**
@@ -484,7 +390,8 @@ BOOLEAN PhCmSortNodesEx(
     )
 {
     PH_TREENEW_SORT_KEYS sortKeys;
-    PH_CM_MULTI_SORT_CONTEXT sortContext;
+    PH_TREENEW_COMPARE_KEY keys[PH_TREENEW_MAX_SORT_KEYS];
+    ULONG numberOfKeys = 0;
     ULONG i;
 
     if (!Manager->Handle || NumberOfNodes < 2)
@@ -503,16 +410,10 @@ BOOLEAN PhCmSortNodesEx(
             return FALSE;
     }
 
-    if (sortKeys.Count == 0)
-        return FALSE;
-
-    memset(&sortContext, 0, sizeof(PH_CM_MULTI_SORT_CONTEXT));
-    sortContext.PostSortFunction = Manager->PostSortFunction;
-
     for (i = 0; i < sortKeys.Count; i++)
     {
         ULONG columnId = sortKeys.Keys[i].Column;
-        PPH_CM_SORT_KEY key = &sortContext.Keys[sortContext.NumberOfKeys];
+        PPH_TREENEW_COMPARE_KEY key = &keys[numberOfKeys];
 
         if (sortKeys.Keys[i].Order == NoSortOrder)
             continue;
@@ -523,7 +424,7 @@ BOOLEAN PhCmSortNodesEx(
                 continue;
 
             key->CompareFunction = Manager->SortFunctions[columnId];
-            key->CompareContext = Manager->SortContext;
+            key->Context = Manager->SortContext;
         }
         else
         {
@@ -535,25 +436,64 @@ BOOLEAN PhCmSortNodesEx(
             if (!(column = tnColumn.Context) || !column->SortFunction)
                 continue;
 
-            key->PluginSortFunction = (PPH_PLUGIN_TREENEW_SORT_FUNCTION)column->SortFunction;
-            key->SubId = column->SubId;
-            key->PluginContext = column->Context;
+            key->CompareFunction = PhCmpPluginColumnCompare;
+            key->Context = column;
         }
 
         key->SortOrder = sortKeys.Keys[i].Order;
-
-        if (sortContext.NumberOfKeys == 0)
-            sortContext.PrimarySortOrder = key->SortOrder;
-
-        sortContext.NumberOfKeys++;
+        numberOfKeys++;
     }
 
-    if (sortContext.NumberOfKeys == 0)
+    if (numberOfKeys == 0)
         return FALSE;
 
-    qsort_s(Nodes, NumberOfNodes, sizeof(PVOID), PhCmpMultiSortFunction, &sortContext);
+    PhTreeNewSortNodesEx(
+        (PVOID *)Nodes,
+        NumberOfNodes,
+        keys,
+        numberOfKeys,
+        Manager->PostSortFunction ? PhCmpPostSortTieBreak : NULL,
+        Manager
+        );
 
     return TRUE;
+}
+
+/**
+ * Sorts an array of TreeNew nodes by a single compare function that is not a
+ * column, such as a list's unsorted order. The manager's post-sort function is
+ * used as the tie-breaker.
+ *
+ * \param Manager A pointer to the column manager.
+ * \param Nodes An array of pointers to TreeNew nodes to sort.
+ * \param NumberOfNodes The number of nodes in the array.
+ * \param CompareFunction The compare function. It returns the raw ascending result.
+ * \param SortOrder The sort order.
+ * \param Context A context value passed to the compare function.
+ */
+VOID PhCmSortNodesByFunction(
+    _In_ PPH_CM_MANAGER Manager,
+    _Inout_updates_(NumberOfNodes) PPH_TREENEW_NODE *Nodes,
+    _In_ ULONG NumberOfNodes,
+    _In_ PPH_CM_COMPARE_FUNCTION CompareFunction,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PH_TREENEW_COMPARE_KEY key;
+
+    key.CompareFunction = CompareFunction;
+    key.Context = Context;
+    key.SortOrder = SortOrder;
+
+    PhTreeNewSortNodesEx(
+        (PVOID *)Nodes,
+        NumberOfNodes,
+        &key,
+        1,
+        Manager->PostSortFunction ? PhCmpPostSortTieBreak : NULL,
+        Manager
+        );
 }
 
 /**

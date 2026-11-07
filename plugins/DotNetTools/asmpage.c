@@ -510,37 +510,47 @@ PDNA_NODE FindAssemblyNode3(
 }
 
 /**
- * Compares two Assembly DNA_NODE pointers by their StructureText for qsort.
+ * Compares two Assembly DNA_NODE nodes by their StructureText.
  *
- * \param elem1 Pointer to the first DNA_NODE pointer.
- * \param elem2 Pointer to the second DNA_NODE pointer.
- * \return Negative if elem1 < elem2, zero if equal, positive if elem1 > elem2.
+ * \param Node1 The first DNA_NODE.
+ * \param Node2 The second DNA_NODE.
+ * \return Negative if Node1 < Node2, zero if equal, positive if Node1 > Node2.
  */
-static int __cdecl AssemblyNodeNameCompareFunction(
-    _In_ const void *elem1,
-    _In_ const void *elem2
+static LONG NTAPI AssemblyNodeNameCompareFunction(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
     )
 {
-    PDNA_NODE node1 = *(PDNA_NODE *)elem1;
-    PDNA_NODE node2 = *(PDNA_NODE *)elem2;
+    PDNA_NODE node1 = Node1;
+    PDNA_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
 
     return PhCompareStringRef(&node1->StructureText, &node2->StructureText, TRUE);
 }
 
 /**
- * Compares two AppDomain DNA_NODE pointers by their AppDomainID for qsort.
+ * Compares two AppDomain DNA_NODE nodes by their AppDomainID.
  *
- * \param elem1 Pointer to the first DNA_NODE pointer.
- * \param elem2 Pointer to the second DNA_NODE pointer.
- * \return Negative if elem1 < elem2, zero if equal, positive if elem1 > elem2.
+ * \param Node1 The first DNA_NODE.
+ * \param Node2 The second DNA_NODE.
+ * \return Negative if Node1 < Node2, zero if equal, positive if Node1 > Node2.
  */
-static int __cdecl AppdomainNodeTypeCompareFunction(
-    _In_ const void *elem1,
-    _In_ const void *elem2
+static LONG NTAPI AppdomainNodeTypeCompareFunction(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
     )
 {
-    PDNA_NODE node1 = *(PDNA_NODE *)elem1;
-    PDNA_NODE node2 = *(PDNA_NODE *)elem2;
+    PDNA_NODE node1 = Node1;
+    PDNA_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
 
     return uint64cmp(node1->u.AppDomain.AppDomainID, node2->u.AppDomain.AppDomainID);
 }
@@ -882,14 +892,28 @@ BOOLEAN NTAPI DotNetAsmTreeNewCallback(
                     getChildren->Children = (PPH_TREENEW_NODE*)context->NodeRootList->Items;
                     getChildren->NumberOfChildren = context->NodeRootList->Count;
 
-                    qsort(context->NodeRootList->Items, context->NodeRootList->Count, sizeof(PVOID), AppdomainNodeTypeCompareFunction);
+                    PhTreeNewSortNodesEx(
+                        context->NodeRootList->Items,
+                        context->NodeRootList->Count,
+                        NULL,
+                        0,
+                        AppdomainNodeTypeCompareFunction,
+                        NULL
+                        );
                 }
                 else
                 {
                     if (node->Type == DNA_TYPE_APPDOMAIN || node == context->ClrV2Node)
                     {
                         // Sort the assemblies.
-                        qsort(node->Children->Items, node->Children->Count, sizeof(PVOID), AssemblyNodeNameCompareFunction);
+                        PhTreeNewSortNodesEx(
+                            node->Children->Items,
+                            node->Children->Count,
+                            NULL,
+                            0,
+                            AssemblyNodeNameCompareFunction,
+                            NULL
+                            );
                     }
 
                     getChildren->Children = (PPH_TREENEW_NODE*)node->Children->Items;

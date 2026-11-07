@@ -598,24 +598,6 @@ BEGIN_SORT_FUNCTION(TriState)
 }
 END_SORT_FUNCTION
 
-/**
- * qsort_s adapter for the unsorted (tri-state) module order.
- */
-static int __cdecl PhpModuleTreeNewCompareTriStateUnsorted(
-    _In_ void *_context,
-    _In_ const void *_elem1,
-    _In_ const void *_elem2
-    )
-{
-    PVOID node1 = *(PVOID *)_elem1;
-    PVOID node2 = *(PVOID *)_elem2;
-    LONG result;
-
-    result = SORT_FUNCTION(TriState)(node1, node2, NoSortOrder, _context);
-
-    return PhpModuleTreeNewPostSortFunction(result, node1, node2, NoSortOrder);
-}
-
 BEGIN_SORT_FUNCTION(Name)
 {
     sortResult = PhCompareStringWithNullSortOrder(moduleItem1->Name, moduleItem2->Name, sortOrder, TRUE);
@@ -931,7 +913,14 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                     getChildren->NumberOfChildren = node->Children->Count;
                 }
 
-                qsort_s(getChildren->Children, getChildren->NumberOfChildren, sizeof(PVOID), PhpModuleTreeNewCompareTriStateUnsorted, context);
+                PhCmSortNodesByFunction(
+                    &context->Cm,
+                    getChildren->Children,
+                    getChildren->NumberOfChildren,
+                    SORT_FUNCTION(TriState),
+                    NoSortOrder,
+                    context
+                    );
             }
             else
             {

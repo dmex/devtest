@@ -10721,22 +10721,26 @@ VOID PhTnpProcessDragSelect(
     }
 }
 
-typedef struct _PH_TREENEW_MULTI_SORT_CONTEXT
+typedef struct _PH_TREENEW_SORT_CONTEXT
 {
+    PCPH_TREENEW_COMPARE_KEY Keys;
     ULONG NumberOfKeys;
-    PPH_TREENEW_COMPARE_FUNCTION CompareFunctions[PH_TREENEW_MAX_SORT_KEYS];
-    PH_SORT_ORDER SortOrders[PH_TREENEW_MAX_SORT_KEYS];
     PPH_TREENEW_COMPARE_FUNCTION TieBreakFunction;
-    PVOID Context;
-} PH_TREENEW_MULTI_SORT_CONTEXT, *PPH_TREENEW_MULTI_SORT_CONTEXT;
+    PVOID TieBreakContext;
+    PH_SORT_ORDER TieBreakOrder;
+} PH_TREENEW_SORT_CONTEXT, *PPH_TREENEW_SORT_CONTEXT;
 
-static int __cdecl PhTnpMultiSortCompare(
+/**
+ * qsort_s thunk. This is the only place that depends on the CRT comparator
+ * signature; callers only see PH_TREENEW_COMPARE_FUNCTION.
+ */
+static int __cdecl PhTnpSortCompareThunk(
     _In_ void *context,
     _In_ const void *elem1,
     _In_ const void *elem2
     )
 {
-    PPH_TREENEW_MULTI_SORT_CONTEXT sortContext = context;
+    PPH_TREENEW_SORT_CONTEXT sortContext = context;
     PVOID node1 = *(PVOID *)elem1;
     PVOID node2 = *(PVOID *)elem2;
     LONG result;
@@ -10744,20 +10748,56 @@ static int __cdecl PhTnpMultiSortCompare(
 
     for (i = 0; i < sortContext->NumberOfKeys; i++)
     {
-        result = sortContext->CompareFunctions[i](node1, node2, sortContext->SortOrders[i], sortContext->Context);
+        PCPH_TREENEW_COMPARE_KEY key = &sortContext->Keys[i];
+
+        result = key->CompareFunction(node1, node2, key->SortOrder, key->Context);
 
         if (result != 0)
-            return PhModifySort(result, sortContext->SortOrders[i]);
+            return PhModifySort(result, key->SortOrder);
     }
 
-    // All keys are equal; use the list's stable tie-breaker in the primary key's direction.
     if (sortContext->TieBreakFunction)
     {
-        result = sortContext->TieBreakFunction(node1, node2, sortContext->SortOrders[0], sortContext->Context);
-        return PhModifySort(result, sortContext->SortOrders[0]);
+        result = sortContext->TieBreakFunction(node1, node2, sortContext->TieBreakOrder, sortContext->TieBreakContext);
+        return PhModifySort(result, sortContext->TieBreakOrder);
     }
 
     return 0;
+}
+
+/**
+ * Sorts an array of TreeNew nodes by a list of compare keys.
+ *
+ * \param Nodes An array of pointers to nodes to sort.
+ * \param NumberOfNodes The number of nodes in the array.
+ * \param Keys The compare keys, primary key first. Each compare function returns
+ * the raw ascending result; the key's sort order is applied by this function.
+ * \param NumberOfKeys The number of keys. May be zero to sort by the tie-breaker only.
+ * \param TieBreakFunction An optional compare function used when all keys are equal.
+ * Its result is applied in the direction of the first key (ascending if there are no keys).
+ * \param TieBreakContext A context value passed to the tie-breaker.
+ */
+VOID NTAPI PhTreeNewSortNodesEx(
+    _Inout_updates_(NumberOfNodes) PVOID *Nodes,
+    _In_ ULONG NumberOfNodes,
+    _In_reads_(NumberOfKeys) PCPH_TREENEW_COMPARE_KEY Keys,
+    _In_ ULONG NumberOfKeys,
+    _In_opt_ PPH_TREENEW_COMPARE_FUNCTION TieBreakFunction,
+    _In_opt_ PVOID TieBreakContext
+    )
+{
+    PH_TREENEW_SORT_CONTEXT sortContext;
+
+    if (NumberOfNodes < 2 || (NumberOfKeys == 0 && !TieBreakFunction))
+        return;
+
+    sortContext.Keys = Keys;
+    sortContext.NumberOfKeys = NumberOfKeys;
+    sortContext.TieBreakFunction = TieBreakFunction;
+    sortContext.TieBreakContext = TieBreakContext;
+    sortContext.TieBreakOrder = NumberOfKeys != 0 ? Keys[0].SortOrder : AscendingSortOrder;
+
+    qsort_s(Nodes, NumberOfNodes, sizeof(PVOID), PhTnpSortCompareThunk, &sortContext);
 }
 
 /**
@@ -10767,13 +10807,12 @@ static int __cdecl PhTnpMultiSortCompare(
  * \param TreeNewHandle A handle to the TreeNew control that owns the nodes.
  * \param Nodes An array of pointers to nodes to sort.
  * \param NumberOfNodes The number of nodes in the array.
- * \param CompareFunctions An array of comparison functions indexed by column ID.
- * Entries may be NULL for columns that cannot be sorted. Each function returns the
- * raw ascending result; the sort order of each key is applied by this function.
+ * \param CompareFunctions An array of compare functions indexed by column ID.
+ * Entries may be NULL for columns that cannot be sorted.
  * \param NumberOfCompareFunctions The number of entries in the array.
- * \param TieBreakFunction An optional comparison function used when all keys are
+ * \param TieBreakFunction An optional compare function used when all keys are
  * equal. Its result is applied in the direction of the primary key.
- * \param Context A context value passed to each comparison function.
+ * \param Context A context value passed to each compare function.
  * \return TRUE if the nodes were sorted, FALSE if there was nothing to sort by.
  */
 BOOLEAN NTAPI PhTreeNewSortNodes(
@@ -10787,18 +10826,15 @@ BOOLEAN NTAPI PhTreeNewSortNodes(
     )
 {
     PH_TREENEW_SORT_KEYS sortKeys;
-    PH_TREENEW_MULTI_SORT_CONTEXT sortContext;
+    PH_TREENEW_COMPARE_KEY keys[PH_TREENEW_MAX_SORT_KEYS];
+    ULONG numberOfKeys = 0;
     ULONG i;
 
     if (NumberOfNodes < 2)
         return FALSE;
 
-    if (!TreeNew_GetSortKeys(TreeNewHandle, &sortKeys) || sortKeys.Count == 0)
+    if (!TreeNew_GetSortKeys(TreeNewHandle, &sortKeys))
         return FALSE;
-
-    memset(&sortContext, 0, sizeof(PH_TREENEW_MULTI_SORT_CONTEXT));
-    sortContext.TieBreakFunction = TieBreakFunction;
-    sortContext.Context = Context;
 
     for (i = 0; i < sortKeys.Count && i < PH_TREENEW_MAX_SORT_KEYS; i++)
     {
@@ -10809,15 +10845,23 @@ BOOLEAN NTAPI PhTreeNewSortNodes(
         if (column >= NumberOfCompareFunctions || !CompareFunctions[column])
             continue;
 
-        sortContext.CompareFunctions[sortContext.NumberOfKeys] = CompareFunctions[column];
-        sortContext.SortOrders[sortContext.NumberOfKeys] = sortKeys.Keys[i].Order;
-        sortContext.NumberOfKeys++;
+        keys[numberOfKeys].CompareFunction = CompareFunctions[column];
+        keys[numberOfKeys].Context = Context;
+        keys[numberOfKeys].SortOrder = sortKeys.Keys[i].Order;
+        numberOfKeys++;
     }
 
-    if (sortContext.NumberOfKeys == 0)
+    if (numberOfKeys == 0)
         return FALSE;
 
-    qsort_s(Nodes, NumberOfNodes, sizeof(PVOID), PhTnpMultiSortCompare, &sortContext);
+    PhTreeNewSortNodesEx(
+        Nodes,
+        NumberOfNodes,
+        keys,
+        numberOfKeys,
+        TieBreakFunction,
+        Context
+        );
 
     return TRUE;
 }

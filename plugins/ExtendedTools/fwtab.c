@@ -1135,18 +1135,20 @@ BEGIN_SORT_FUNCTION(FqbnName)
 }
 END_SORT_FUNCTION
 
-int __cdecl EtFwNodeNoOrderSortFunction(
-    _In_ void const* _elem1,
-    _In_ void const* _elem2
+static LONG NTAPI EtFwNodeNoOrderSortFunction(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
     )
 {
-    PFW_EVENT_ITEM node1 = *(PFW_EVENT_ITEM*)_elem1;
-    PFW_EVENT_ITEM node2 = *(PFW_EVENT_ITEM*)_elem2;
-    int sortResult;
+    PFW_EVENT_ITEM node1 = Node1;
+    PFW_EVENT_ITEM node2 = Node2;
 
-    sortResult = uint64cmp(node1->Index, node2->Index);
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
 
-    return PhModifySort(sortResult, DescendingSortOrder);
+    return uint64cmp(node1->Index, node2->Index);
 }
 
 typedef enum _FW_ITEM_COMMAND_ID
@@ -1182,7 +1184,21 @@ BOOLEAN NTAPI FwTreeNewCallback(
             {
                 if (!node)
                 {
-                    qsort(FwNodeList->Items, FwNodeList->Count, sizeof(PVOID), EtFwNodeNoOrderSortFunction);
+                    PH_TREENEW_COMPARE_KEY key;
+
+                    // Unsorted: by event index, descending.
+                    key.CompareFunction = EtFwNodeNoOrderSortFunction;
+                    key.Context = NULL;
+                    key.SortOrder = DescendingSortOrder;
+
+                    PhTreeNewSortNodesEx(
+                        FwNodeList->Items,
+                        FwNodeList->Count,
+                        &key,
+                        1,
+                        NULL,
+                        NULL
+                        );
 
                     getChildren->Children = (PPH_TREENEW_NODE*)FwNodeList->Items;
                     getChildren->NumberOfChildren = FwNodeList->Count;

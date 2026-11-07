@@ -419,6 +419,14 @@ LONG NTAPI PH_TREENEW_COMPARE_FUNCTION(
     );
 typedef PH_TREENEW_COMPARE_FUNCTION* PPH_TREENEW_COMPARE_FUNCTION;
 
+typedef struct _PH_TREENEW_COMPARE_KEY
+{
+    PPH_TREENEW_COMPARE_FUNCTION CompareFunction;
+    PVOID Context; // Passed to CompareFunction.
+    PH_SORT_ORDER SortOrder;
+} PH_TREENEW_COMPARE_KEY, *PPH_TREENEW_COMPARE_KEY;
+typedef const PH_TREENEW_COMPARE_KEY* PCPH_TREENEW_COMPARE_KEY;
+
 typedef struct _PH_TREENEW_SORT_CHANGED_EVENT
 {
     ULONG SortColumn;
@@ -932,6 +940,18 @@ RTL_ATOM
 NTAPI
 PhTreeNewInitialization(
     VOID
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhTreeNewSortNodesEx(
+    _Inout_updates_(NumberOfNodes) PVOID *Nodes,
+    _In_ ULONG NumberOfNodes,
+    _In_reads_(NumberOfKeys) PCPH_TREENEW_COMPARE_KEY Keys,
+    _In_ ULONG NumberOfKeys,
+    _In_opt_ PPH_TREENEW_COMPARE_FUNCTION TieBreakFunction,
+    _In_opt_ PVOID TieBreakContext
     );
 
 PHLIBAPI

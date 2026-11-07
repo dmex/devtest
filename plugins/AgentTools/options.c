@@ -466,15 +466,6 @@ static LONG NTAPI AtpToolsCompareTieBreak(
     return uintptrcmp((ULONG_PTR)node1->Tool, (ULONG_PTR)node2->Tool);
 }
 
-static int __cdecl AtpToolsUnsortedCompare(
-    _In_ void* Context,
-    _In_ const void* Elem1,
-    _In_ const void* Elem2
-    )
-{
-    return AtpToolsCompareTieBreak(*(PVOID*)Elem1, *(PVOID*)Elem2, NoSortOrder, Context);
-}
-
 static VOID AtpToolsSortNodes(
     _In_ HWND TreeNewHandle,
     _In_ PAT_TOOLS_CONTEXT Context
@@ -497,7 +488,15 @@ static VOID AtpToolsSortNodes(
         Context
         ))
     {
-        qsort_s(Context->NodeList->Items, Context->NodeList->Count, sizeof(PVOID), AtpToolsUnsortedCompare, Context);
+        // Unsorted: keep a stable order.
+        PhTreeNewSortNodesEx(
+            Context->NodeList->Items,
+            Context->NodeList->Count,
+            NULL,
+            0,
+            AtpToolsCompareTieBreak,
+            Context
+            );
     }
 }
 
@@ -1054,15 +1053,6 @@ static LONG NTAPI AtpAgentsCompareTieBreak(
     return uintcmp(node1->ConnectionId, node2->ConnectionId);
 }
 
-static int __cdecl AtpAgentsUnsortedCompare(
-    _In_ void* Context,
-    _In_ const void* Elem1,
-    _In_ const void* Elem2
-    )
-{
-    return AtpAgentsCompareTieBreak(*(PVOID*)Elem1, *(PVOID*)Elem2, NoSortOrder, Context);
-}
-
 static VOID AtpAgentsSortNodes(
     _In_ HWND TreeNewHandle,
     _In_ PAT_AGENTS_CONTEXT Context
@@ -1089,7 +1079,15 @@ static VOID AtpAgentsSortNodes(
         Context
         ))
     {
-        qsort_s(Context->NodeList->Items, Context->NodeList->Count, sizeof(PVOID), AtpAgentsUnsortedCompare, Context);
+        // Unsorted: keep a stable order.
+        PhTreeNewSortNodesEx(
+            Context->NodeList->Items,
+            Context->NodeList->Count,
+            NULL,
+            0,
+            AtpAgentsCompareTieBreak,
+            Context
+            );
     }
 }
 
