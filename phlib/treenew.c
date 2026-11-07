@@ -5131,10 +5131,14 @@ VOID PhTnpProcessSortColumnEx(
     }
     else if (NewColumn->Id == Context->SortColumn)
     {
-        Context->SortOrder = PhTnpCycleSortOrder(Context, NewColumn, Context->SortOrder);
+        PH_SORT_ORDER newOrder = PhTnpCycleSortOrder(Context, NewColumn, Context->SortOrder);
 
-        if (Context->SortOrder == NoSortOrder)
+        // Remove the key while the primary order is still set so that
+        // PhTnpRemoveSortKey promotes the next key instead of dropping them all.
+        if (newOrder == NoSortOrder)
             PhTnpRemoveSortKey(Context, NewColumn->Id);
+        else
+            Context->SortOrder = newOrder;
     }
     else
     {
