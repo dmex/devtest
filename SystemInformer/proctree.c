@@ -3308,7 +3308,11 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 if (sortColumn == ProcessTreeListSortColumn && sortOrder == ProcessTreeListSortOrder && sortOrder != NoSortOrder)
                 {
                     // Sort by all of the control's sort keys.
-                    PhCmSortNodes(&ProcessTreeListCm, (PPH_TREENEW_NODE *)sortList->Items, sortList->Count);
+                    PhCmSortNodes(
+                        &ProcessTreeListCm,
+                        (PPH_TREENEW_NODE *)sortList->Items,
+                        sortList->Count
+                        );
                 }
                 else
                 {
@@ -3321,7 +3325,12 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                     sortKeys.Keys[0].Column = sortColumn;
                     sortKeys.Keys[0].Order = sortOrder != NoSortOrder ? sortOrder : AscendingSortOrder;
 
-                    PhCmSortNodesEx(&ProcessTreeListCm, (PPH_TREENEW_NODE *)sortList->Items, sortList->Count, &sortKeys);
+                    PhCmSortNodesEx(
+                        &ProcessTreeListCm,
+                        (PPH_TREENEW_NODE *)sortList->Items,
+                        sortList->Count,
+                        &sortKeys
+                        );
                 }
             }
         }

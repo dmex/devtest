@@ -881,7 +881,15 @@ BOOLEAN NTAPI PvImportTreeNewCallback(
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PV_IMPORT_TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                PhTreeNewSortNodes(hwnd, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
+                PhTreeNewSortNodes(
+                    hwnd,
+                    context->NodeList->Items,
+                    context->NodeList->Count,
+                    sortFunctions,
+                    RTL_NUMBER_OF(sortFunctions),
+                    SORT_FUNCTION(TieBreak),
+                    context
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

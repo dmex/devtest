@@ -2325,7 +2325,15 @@ BOOLEAN NTAPI PhpWmiProviderTreeNewCallback(
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PROCESS_WMI_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
+                PhTreeNewSortNodes(
+                    WindowHandle,
+                    context->NodeList->Items,
+                    context->NodeList->Count,
+                    sortFunctions,
+                    RTL_NUMBER_OF(sortFunctions),
+                    SORT_FUNCTION(TieBreak),
+                    context
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE*)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

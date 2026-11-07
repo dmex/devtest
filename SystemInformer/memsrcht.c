@@ -1094,7 +1094,15 @@ BOOLEAN NTAPI PhpMemoryStringsTreeNewCallback(
                 if (!(context->TreeNewSortColumn == PH_MEMSTRINGS_TREE_COLUMN_ITEM_INDEX &&
                     context->TreeNewSortOrder != DescendingSortOrder))
                 {
-                    PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
+                    PhTreeNewSortNodes(
+                        WindowHandle,
+                        context->NodeList->Items,
+                        context->NodeList->Count,
+                        sortFunctions,
+                        RTL_NUMBER_OF(sortFunctions),
+                        SORT_FUNCTION(TieBreak),
+                        context
+                        );
                 }
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;

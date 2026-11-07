@@ -3167,7 +3167,15 @@ BOOLEAN NTAPI OptionsAdvancedTreeNewCallback(
                     SORT_FUNCTION(Description),
                 };
 
-                PhTreeNewSortNodes(hwnd, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
+                PhTreeNewSortNodes(
+                    hwnd,
+                    context->NodeList->Items,
+                    context->NodeList->Count,
+                    sortFunctions,
+                    RTL_NUMBER_OF(sortFunctions),
+                    SORT_FUNCTION(TieBreak),
+                    context
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE*)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

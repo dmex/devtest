@@ -636,7 +636,11 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
                 if (!NetworkTreeListCm.SortFunctions)
                     PhCmRegisterSortFunctions(&NetworkTreeListCm, sortFunctions, RTL_NUMBER_OF(sortFunctions), NULL);
 
-                PhCmSortNodes(&NetworkTreeListCm, (PPH_TREENEW_NODE *)NetworkNodeList->Items, NetworkNodeList->Count);
+                PhCmSortNodes(
+                    &NetworkTreeListCm,
+                    (PPH_TREENEW_NODE *)NetworkNodeList->Items,
+                    NetworkNodeList->Count
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE *)NetworkNodeList->Items;
                 getChildren->NumberOfChildren = NetworkNodeList->Count;

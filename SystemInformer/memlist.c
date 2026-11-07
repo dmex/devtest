@@ -913,7 +913,11 @@ BOOLEAN NTAPI PhpMemoryTreeNewCallback(
                     if (!context->Cm.SortFunctions)
                         PhCmRegisterSortFunctions(&context->Cm, sortFunctions, RTL_NUMBER_OF(sortFunctions), context);
 
-                    PhCmSortNodes(&context->Cm, (PPH_TREENEW_NODE *)context->RegionNodeList->Items, context->RegionNodeList->Count);
+                    PhCmSortNodes(
+                        &context->Cm,
+                        (PPH_TREENEW_NODE *)context->RegionNodeList->Items,
+                        context->RegionNodeList->Count
+                        );
 
                     getChildren->Children = (PPH_TREENEW_NODE *)context->RegionNodeList->Items;
                     getChildren->NumberOfChildren = context->RegionNodeList->Count;

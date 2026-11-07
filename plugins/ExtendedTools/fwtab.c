@@ -1229,7 +1229,15 @@ BOOLEAN NTAPI FwTreeNewCallback(
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == FW_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
-                    PhTreeNewSortNodes(WindowHandle, FwNodeList->Items, FwNodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), NULL);
+                    PhTreeNewSortNodes(
+                        WindowHandle,
+                        FwNodeList->Items,
+                        FwNodeList->Count,
+                        sortFunctions,
+                        RTL_NUMBER_OF(sortFunctions),
+                        SORT_FUNCTION(TieBreak),
+                        NULL
+                        );
 
                     getChildren->Children = (PPH_TREENEW_NODE*)FwNodeList->Items;
                     getChildren->NumberOfChildren = FwNodeList->Count;

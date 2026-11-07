@@ -6802,7 +6802,15 @@ BOOLEAN NTAPI PhpAppPolicyTreeNewCallback(
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == 2, "SortFunctions must equal maximum.");
 
-                    PhTreeNewSortNodes(WindowHandle, context->RootList->Items, context->RootList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
+                    PhTreeNewSortNodes(
+                        WindowHandle,
+                        context->RootList->Items,
+                        context->RootList->Count,
+                        sortFunctions,
+                        RTL_NUMBER_OF(sortFunctions),
+                        SORT_FUNCTION(TieBreak),
+                        context
+                        );
 
                     getChildren->Children = (PPH_TREENEW_NODE*)context->RootList->Items;
                     getChildren->NumberOfChildren = context->RootList->Count;

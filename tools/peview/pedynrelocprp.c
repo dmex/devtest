@@ -1291,7 +1291,15 @@ BOOLEAN NTAPI PvDynRelocTreeNewCallback(
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PV_DYNRELOC_TREE_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
-                PhTreeNewSortNodes(WindowHandle, context->NodeRootList->Items, context->NodeRootList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
+                PhTreeNewSortNodes(
+                    WindowHandle,
+                    context->NodeRootList->Items,
+                    context->NodeRootList->Count,
+                    sortFunctions,
+                    RTL_NUMBER_OF(sortFunctions),
+                    SORT_FUNCTION(TieBreak),
+                    context
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE*)context->NodeRootList->Items;
                 getChildren->NumberOfChildren = context->NodeRootList->Count;

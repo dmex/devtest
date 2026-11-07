@@ -378,7 +378,15 @@ BOOLEAN NTAPI PvSymbolTreeNewCallback(
             }
             else
             {
-                PhTreeNewSortNodes(hwnd, list->Items, list->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
+                PhTreeNewSortNodes(
+                    hwnd,
+                    list->Items,
+                    list->Count,
+                    sortFunctions,
+                    RTL_NUMBER_OF(sortFunctions),
+                    SORT_FUNCTION(TieBreak),
+                    context
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE *)list->Items;
                 getChildren->NumberOfChildren = list->Count;

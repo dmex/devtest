@@ -487,7 +487,15 @@ static VOID AtpToolsSortNodes(
         AtpToolsCompareAuthorization, // AT_COLUMN_AUTHORIZATION
     };
 
-    if (!PhTreeNewSortNodes(TreeNewHandle, Context->NodeList->Items, Context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), AtpToolsCompareTieBreak, Context))
+    if (!PhTreeNewSortNodes(
+        TreeNewHandle,
+        Context->NodeList->Items,
+        Context->NodeList->Count,
+        sortFunctions,
+        RTL_NUMBER_OF(sortFunctions),
+        AtpToolsCompareTieBreak,
+        Context
+        ))
     {
         qsort_s(Context->NodeList->Items, Context->NodeList->Count, sizeof(PVOID), AtpToolsUnsortedCompare, Context);
     }
@@ -1071,7 +1079,15 @@ static VOID AtpAgentsSortNodes(
         AtpAgentsCompareGrants, // AT_AGENT_COLUMN_GRANTS
     };
 
-    if (!PhTreeNewSortNodes(TreeNewHandle, Context->NodeList->Items, Context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), AtpAgentsCompareTieBreak, Context))
+    if (!PhTreeNewSortNodes(
+        TreeNewHandle,
+        Context->NodeList->Items,
+        Context->NodeList->Count,
+        sortFunctions,
+        RTL_NUMBER_OF(sortFunctions),
+        AtpAgentsCompareTieBreak,
+        Context
+        ))
     {
         qsort_s(Context->NodeList->Items, Context->NodeList->Count, sizeof(PVOID), AtpAgentsUnsortedCompare, Context);
     }

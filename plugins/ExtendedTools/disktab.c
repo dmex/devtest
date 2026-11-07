@@ -708,7 +708,15 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == ETDSTNC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                PhTreeNewSortNodes(WindowHandle, DiskNodeList->Items, DiskNodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), NULL);
+                PhTreeNewSortNodes(
+                    WindowHandle,
+                    DiskNodeList->Items,
+                    DiskNodeList->Count,
+                    sortFunctions,
+                    RTL_NUMBER_OF(sortFunctions),
+                    SORT_FUNCTION(TieBreak),
+                    NULL
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE *)DiskNodeList->Items;
                 getChildren->NumberOfChildren = DiskNodeList->Count;

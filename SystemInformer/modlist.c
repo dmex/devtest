@@ -974,7 +974,11 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                 if (!context->Cm.SortFunctions)
                     PhCmRegisterSortFunctions(&context->Cm, sortFunctions, RTL_NUMBER_OF(sortFunctions), context);
 
-                PhCmSortNodes(&context->Cm, (PPH_TREENEW_NODE *)context->NodeList->Items, context->NodeList->Count);
+                PhCmSortNodes(
+                    &context->Cm,
+                    (PPH_TREENEW_NODE *)context->NodeList->Items,
+                    context->NodeList->Count
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

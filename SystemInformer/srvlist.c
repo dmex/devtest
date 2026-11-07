@@ -1067,7 +1067,11 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
                 if (!ServiceTreeListCm.SortFunctions)
                     PhCmRegisterSortFunctions(&ServiceTreeListCm, sortFunctions, RTL_NUMBER_OF(sortFunctions), NULL);
 
-                PhCmSortNodes(&ServiceTreeListCm, (PPH_TREENEW_NODE *)ServiceNodeList->Items, ServiceNodeList->Count);
+                PhCmSortNodes(
+                    &ServiceTreeListCm,
+                    (PPH_TREENEW_NODE *)ServiceNodeList->Items,
+                    ServiceNodeList->Count
+                    );
 
                 getChildren->Children = (PPH_TREENEW_NODE *)ServiceNodeList->Items;
                 getChildren->NumberOfChildren = ServiceNodeList->Count;
