@@ -542,28 +542,25 @@ VOID PhTickModuleNodes(
 }
 
 #define SORT_FUNCTION(Column) PhpModuleTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpModuleTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpModuleTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PPH_MODULE_LIST_CONTEXT context = ((PPH_MODULE_LIST_CONTEXT)_context); \
-    PPH_MODULE_NODE node1 = *(PPH_MODULE_NODE *)_elem1; \
-    PPH_MODULE_NODE node2 = *(PPH_MODULE_NODE *)_elem2; \
+    PPH_MODULE_NODE node1 = (PPH_MODULE_NODE)_node1; \
+    PPH_MODULE_NODE node2 = (PPH_MODULE_NODE)_node2; \
     PPH_MODULE_ITEM moduleItem1 = node1->ModuleItem; \
     PPH_MODULE_ITEM moduleItem2 = node2->ModuleItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhCmSortNodes (see the post-sort function).
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)moduleItem1->BaseAddress, (ULONG_PTR)moduleItem2->BaseAddress); \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)moduleItem1->EnclaveBaseAddress, (ULONG_PTR)moduleItem2->EnclaveBaseAddress); \
-    if (sortResult == 0) \
-        sortResult = PhCompareStringWithNullSortOrder(moduleItem1->FileName, moduleItem2->FileName, context->TreeNewSortOrder, FALSE); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
 
 _Function_class_(PH_CM_POST_SORT_FUNCTION)
@@ -596,14 +593,32 @@ BEGIN_SORT_FUNCTION(TriState)
     }
     else
     {
-        sortResult = PhCompareStringWithNullSortOrder(moduleItem1->Name, moduleItem2->Name, context->TreeNewSortOrder, TRUE); // fall back to sorting by name
+        sortResult = PhCompareStringWithNullSortOrder(moduleItem1->Name, moduleItem2->Name, sortOrder, TRUE); // fall back to sorting by name
     }
 }
 END_SORT_FUNCTION
 
+/**
+ * qsort_s adapter for the unsorted (tri-state) module order.
+ */
+static int __cdecl PhpModuleTreeNewCompareTriStateUnsorted(
+    _In_ void *_context,
+    _In_ const void *_elem1,
+    _In_ const void *_elem2
+    )
+{
+    PVOID node1 = *(PVOID *)_elem1;
+    PVOID node2 = *(PVOID *)_elem2;
+    LONG result;
+
+    result = SORT_FUNCTION(TriState)(node1, node2, NoSortOrder, _context);
+
+    return PhpModuleTreeNewPostSortFunction(result, node1, node2, NoSortOrder);
+}
+
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->Name, moduleItem2->Name, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->Name, moduleItem2->Name, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -621,25 +636,25 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Description)
 {
-    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->VersionInfo.FileDescription, moduleItem2->VersionInfo.FileDescription, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->VersionInfo.FileDescription, moduleItem2->VersionInfo.FileDescription, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(CompanyName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->VersionInfo.CompanyName, moduleItem2->VersionInfo.CompanyName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->VersionInfo.CompanyName, moduleItem2->VersionInfo.CompanyName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Version)
 {
-    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->VersionInfo.FileVersion, moduleItem2->VersionInfo.FileVersion, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->VersionInfo.FileVersion, moduleItem2->VersionInfo.FileVersion, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(FileName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->FileName, moduleItem2->FileName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->FileName, moduleItem2->FileName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -666,7 +681,7 @@ BEGIN_SORT_FUNCTION(VerifiedSigner)
     sortResult = PhCompareStringWithNullSortOrder(
         moduleItem1->VerifySignerName,
         moduleItem2->VerifySignerName,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -758,13 +773,13 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(OriginalName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->FileName, moduleItem2->FileName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(moduleItem1->FileName, moduleItem2->FileName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(ServiceName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ServiceText, node2->ServiceText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ServiceText, node2->ServiceText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -916,11 +931,11 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                     getChildren->NumberOfChildren = node->Children->Count;
                 }
 
-                qsort_s(getChildren->Children, getChildren->NumberOfChildren, sizeof(PVOID), SORT_FUNCTION(TriState), context);
+                qsort_s(getChildren->Children, getChildren->NumberOfChildren, sizeof(PVOID), PhpModuleTreeNewCompareTriStateUnsorted, context);
             }
             else
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_CM_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Name),
                     SORT_FUNCTION(BaseAddress),
@@ -953,39 +968,13 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                     SORT_FUNCTION(Architecture),
                     SORT_FUNCTION(LdrFlags),
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PHMOTLC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortOrder == NoSortOrder)
-                {
-                    sortFunction = SORT_FUNCTION(TriState);
-                }
-                else
-                {
-                    if (!PhCmForwardSort(
-                        (PPH_TREENEW_NODE *)context->NodeList->Items,
-                        context->NodeList->Count,
-                        context->TreeNewSortColumn,
-                        context->TreeNewSortOrder,
-                        &context->Cm
-                        ))
-                    {
-                        if (context->TreeNewSortColumn < PHMOTLC_MAXIMUM)
-                            sortFunction = sortFunctions[context->TreeNewSortColumn];
-                        else
-                            sortFunction = NULL;
-                    }
-                    else
-                    {
-                        sortFunction = NULL;
-                    }
-                }
+                if (!context->Cm.SortFunctions)
+                    PhCmRegisterSortFunctions(&context->Cm, sortFunctions, RTL_NUMBER_OF(sortFunctions), context);
 
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhCmSortNodes(&context->Cm, (PPH_TREENEW_NODE *)context->NodeList->Items, context->NodeList->Count);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

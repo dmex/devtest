@@ -13,24 +13,32 @@
 #include "poolmon.h"
 
 #define SORT_FUNCTION(Column) EtPoolTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl EtPoolTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI EtPoolTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPOOLTAG_ROOT_NODE node1 = *(PPOOLTAG_ROOT_NODE*)_elem1; \
-    PPOOLTAG_ROOT_NODE node2 = *(PPOOLTAG_ROOT_NODE*)_elem2; \
+    PPOOLTAG_ROOT_NODE node1 = (PPOOLTAG_ROOT_NODE)_node1; \
+    PPOOLTAG_ROOT_NODE node2 = (PPOOLTAG_ROOT_NODE)_node2; \
     PPOOL_ITEM poolItem1 = node1->PoolItem; \
     PPOOL_ITEM poolItem2 = node2->PoolItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)poolItem1->TagUlong, (ULONG_PTR)poolItem2->TagUlong); \
-    \
-    return PhModifySort(sortResult, ((PPOOLTAG_CONTEXT)_context)->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uintptrcmp((ULONG_PTR)poolItem1->TagUlong, (ULONG_PTR)poolItem2->TagUlong);
+}
+END_SORT_FUNCTION
 
 VOID EtLoadSettingsPoolTagTreeList(
     _Inout_ PPOOLTAG_CONTEXT Context
@@ -458,7 +466,7 @@ BOOLEAN NTAPI EtPoolTagTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Name),
                     SORT_FUNCTION(Type),
@@ -488,19 +496,10 @@ BOOLEAN NTAPI EtPoolTagTreeNewCallback(
                     SORT_FUNCTION(CurrentDelta),
                     SORT_FUNCTION(TotalDelta),
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
-                    sortFunction = sortFunctions[context->TreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

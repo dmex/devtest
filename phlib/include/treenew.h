@@ -404,6 +404,21 @@ typedef struct _PH_TREENEW_SORT_KEYS
     PH_TREENEW_SORT_KEY Keys[PH_TREENEW_MAX_SORT_KEYS];
 } PH_TREENEW_SORT_KEYS, *PPH_TREENEW_SORT_KEYS;
 
+/**
+ * Compares two nodes for a single sort key. Returns the raw ascending result
+ * (negative, zero, positive) without applying the sort order and without a
+ * tie-breaker, so that further sort keys can be evaluated. SortOrder is the
+ * order of this key, for helpers such as PhCompareStringWithNullSortOrder.
+ */
+typedef _Function_class_(PH_TREENEW_COMPARE_FUNCTION)
+LONG NTAPI PH_TREENEW_COMPARE_FUNCTION(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    );
+typedef PH_TREENEW_COMPARE_FUNCTION* PPH_TREENEW_COMPARE_FUNCTION;
+
 typedef struct _PH_TREENEW_SORT_CHANGED_EVENT
 {
     ULONG SortColumn;
@@ -917,6 +932,19 @@ RTL_ATOM
 NTAPI
 PhTreeNewInitialization(
     VOID
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhTreeNewSortNodes(
+    _In_ HWND TreeNewHandle,
+    _Inout_updates_(NumberOfNodes) PVOID *Nodes,
+    _In_ ULONG NumberOfNodes,
+    _In_reads_(NumberOfCompareFunctions) const PPH_TREENEW_COMPARE_FUNCTION *CompareFunctions,
+    _In_ ULONG NumberOfCompareFunctions,
+    _In_opt_ PPH_TREENEW_COMPARE_FUNCTION TieBreakFunction,
+    _In_opt_ PVOID Context
     );
 
 FORCEINLINE VOID PhInitializeTreeNewNode(

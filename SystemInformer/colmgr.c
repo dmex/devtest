@@ -464,6 +464,25 @@ BOOLEAN PhCmSortNodes(
     _In_ ULONG NumberOfNodes
     )
 {
+    return PhCmSortNodesEx(Manager, Nodes, NumberOfNodes, NULL);
+}
+
+/**
+ * Sorts an array of TreeNew nodes by a set of sort keys.
+ *
+ * \param Manager A pointer to the column manager.
+ * \param Nodes An array of pointers to TreeNew nodes to sort.
+ * \param NumberOfNodes The number of nodes in the array.
+ * \param SortKeys The sort keys to use, or NULL to use the control's current sort keys.
+ * \return TRUE if the nodes were sorted, FALSE if there was nothing to sort by.
+ */
+BOOLEAN PhCmSortNodesEx(
+    _In_ PPH_CM_MANAGER Manager,
+    _Inout_updates_(NumberOfNodes) PPH_TREENEW_NODE *Nodes,
+    _In_ ULONG NumberOfNodes,
+    _In_opt_ PPH_TREENEW_SORT_KEYS SortKeys
+    )
+{
     PH_TREENEW_SORT_KEYS sortKeys;
     PH_CM_MULTI_SORT_CONTEXT sortContext;
     ULONG i;
@@ -471,12 +490,24 @@ BOOLEAN PhCmSortNodes(
     if (!Manager->Handle || NumberOfNodes < 2)
         return FALSE;
 
-    if (!TreeNew_GetSortKeys(Manager->Handle, &sortKeys) || sortKeys.Count == 0)
+    if (SortKeys)
+    {
+        if (SortKeys->Count > PH_TREENEW_MAX_SORT_KEYS)
+            return FALSE;
+
+        sortKeys = *SortKeys;
+    }
+    else
+    {
+        if (!TreeNew_GetSortKeys(Manager->Handle, &sortKeys))
+            return FALSE;
+    }
+
+    if (sortKeys.Count == 0)
         return FALSE;
 
     memset(&sortContext, 0, sizeof(PH_CM_MULTI_SORT_CONTEXT));
     sortContext.PostSortFunction = Manager->PostSortFunction;
-    sortContext.PrimarySortOrder = sortKeys.Keys[0].Order;
 
     for (i = 0; i < sortKeys.Count; i++)
     {
@@ -510,6 +541,10 @@ BOOLEAN PhCmSortNodes(
         }
 
         key->SortOrder = sortKeys.Keys[i].Order;
+
+        if (sortContext.NumberOfKeys == 0)
+            sortContext.PrimarySortOrder = key->SortOrder;
+
         sortContext.NumberOfKeys++;
     }
 

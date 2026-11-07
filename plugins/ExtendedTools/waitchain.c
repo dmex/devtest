@@ -583,23 +583,30 @@ INT_PTR CALLBACK WaitChainDlgProc(
 }
 
 #define SORT_FUNCTION(Column) WctTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl WctTreeNewCompare##Column( \
-    _In_ void* _context, \
-    _In_ void const* _elem1, \
-    _In_ void const* _elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI WctTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PWCT_TREE_CONTEXT context = _context; \
-    PWCT_ROOT_NODE node1 = *(PWCT_ROOT_NODE *)_elem1; \
-    PWCT_ROOT_NODE node2 = *(PWCT_ROOT_NODE *)_elem2; \
-    int sortResult = 0;
+    PWCT_ROOT_NODE node1 = (PWCT_ROOT_NODE)_node1; \
+    PWCT_ROOT_NODE node2 = (PWCT_ROOT_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uint64cmp(node1->Node.Index, node2->Node.Index); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uint64cmp(node1->Node.Index, node2->Node.Index);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Type)
 {
@@ -615,13 +622,13 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ObjectNameString, node2->ObjectNameString, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ObjectNameString, node2->ObjectNameString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Timeout)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->TimeoutString, node2->TimeoutString, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->TimeoutString, node2->TimeoutString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -691,7 +698,7 @@ BOOLEAN NTAPI WtcWaitTreeNewCallback(
             {
                 if (!node)
                 {
-                    static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                    static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                     {
                         SORT_FUNCTION(Type),
                         SORT_FUNCTION(Status),
@@ -703,19 +710,10 @@ BOOLEAN NTAPI WtcWaitTreeNewCallback(
                         SORT_FUNCTION(WaitTime),
                         SORT_FUNCTION(ContextSwitch),
                     };
-                    _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                    if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
-                        sortFunction = sortFunctions[context->TreeNewSortColumn];
-                    else
-                        sortFunction = NULL;
-
-                    if (sortFunction)
-                    {
-                        qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                    }
+                    PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                     getChildren->Children = (PPH_TREENEW_NODE*)context->NodeList->Items;
                     getChildren->NumberOfChildren = context->NodeList->Count;

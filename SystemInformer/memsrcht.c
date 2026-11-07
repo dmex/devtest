@@ -968,22 +968,30 @@ VOID PhpSearchMemoryStrings(
 }
 
 #define SORT_FUNCTION(Column) PvpStringsTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PvpStringsTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PvpStringsTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPH_MEMSTRINGS_NODE node1 = *(PPH_MEMSTRINGS_NODE *)_elem1; \
-    PPH_MEMSTRINGS_NODE node2 = *(PPH_MEMSTRINGS_NODE *)_elem2; \
-    int sortResult = 0;
+    PPH_MEMSTRINGS_NODE node1 = (PPH_MEMSTRINGS_NODE)_node1; \
+    PPH_MEMSTRINGS_NODE node2 = (PPH_MEMSTRINGS_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintcmp(node1->Index, node2->Index); \
-    \
-    return PhModifySort(sortResult, ((PPH_MEMSTRINGS_CONTEXT)_context)->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uintcmp(node1->Index, node2->Index);
+}
+END_SORT_FUNCTION
 
 _Function_class_(PH_CM_POST_SORT_FUNCTION)
 LONG PhpMemoryStringsTreeNewPostSortFunction(
@@ -1067,7 +1075,7 @@ BOOLEAN NTAPI PhpMemoryStringsTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Index),
                     SORT_FUNCTION(BaseAddress),
@@ -1078,24 +1086,15 @@ BOOLEAN NTAPI PhpMemoryStringsTreeNewCallback(
                     SORT_FUNCTION(Protection),
                     SORT_FUNCTION(MemoryType),
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PH_MEMSTRINGS_TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortColumn < PH_MEMSTRINGS_TREE_COLUMN_ITEM_MAXIMUM)
-                    sortFunction = sortFunctions[context->TreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                // Nodes are added in index order; skip the sort when column is Index ascending.
-                BOOLEAN skipSort =
-                    sortFunction &&
-                    context->TreeNewSortColumn == PH_MEMSTRINGS_TREE_COLUMN_ITEM_INDEX &&
-                    context->TreeNewSortOrder != DescendingSortOrder;
-
-                if (sortFunction && !skipSort)
+                // Nodes are added in index order and the index is unique, so skip the
+                // sort when the primary key is Index ascending.
+                if (!(context->TreeNewSortColumn == PH_MEMSTRINGS_TREE_COLUMN_ITEM_INDEX &&
+                    context->TreeNewSortOrder != DescendingSortOrder))
                 {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
+                    PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
                 }
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;

@@ -402,37 +402,95 @@ VOID AtpShowContextMenu(
     PhDereferenceObject(tools);
 }
 
-int __cdecl AtpToolsSortFunction(
+static LONG NTAPI AtpToolsCompareTool(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_TOOL_NODE node1 = Node1;
+    PAT_TOOL_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return PhCompareStringZ(node1->Tool->DisplayName, node2->Tool->DisplayName, TRUE);
+}
+
+static LONG NTAPI AtpToolsCompareAccess(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_TOOL_NODE node1 = Node1;
+    PAT_TOOL_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return uintcmp(PhGetIntegerSetting(node1->Tool->AccessSetting), PhGetIntegerSetting(node2->Tool->AccessSetting));
+}
+
+static LONG NTAPI AtpToolsCompareAuthorization(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_TOOL_NODE node1 = Node1;
+    PAT_TOOL_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return uintcmp(PhGetIntegerSetting(node1->Tool->ConfirmSetting), PhGetIntegerSetting(node2->Tool->ConfirmSetting));
+}
+
+static LONG NTAPI AtpToolsCompareTieBreak(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_TOOL_NODE node1 = Node1;
+    PAT_TOOL_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return uintptrcmp((ULONG_PTR)node1->Tool, (ULONG_PTR)node2->Tool);
+}
+
+static int __cdecl AtpToolsUnsortedCompare(
     _In_ void* Context,
     _In_ const void* Elem1,
     _In_ const void* Elem2
     )
 {
-    PAT_TOOLS_CONTEXT context = Context;
-    PAT_TOOL_NODE node1 = *(PAT_TOOL_NODE*)Elem1;
-    PAT_TOOL_NODE node2 = *(PAT_TOOL_NODE*)Elem2;
-    int result = 0;
+    return AtpToolsCompareTieBreak(*(PVOID*)Elem1, *(PVOID*)Elem2, NoSortOrder, Context);
+}
 
-    if (context->SortOrder != NoSortOrder)
+static VOID AtpToolsSortNodes(
+    _In_ HWND TreeNewHandle,
+    _In_ PAT_TOOLS_CONTEXT Context
+    )
+{
+    static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
     {
-        switch (context->SortColumn)
-        {
-        case AT_COLUMN_TOOL:
-            result = PhCompareStringZ(node1->Tool->DisplayName, node2->Tool->DisplayName, TRUE);
-            break;
-        case AT_COLUMN_ACCESS:
-            result = uintcmp(PhGetIntegerSetting(node1->Tool->AccessSetting), PhGetIntegerSetting(node2->Tool->AccessSetting));
-            break;
-        case AT_COLUMN_AUTHORIZATION:
-            result = uintcmp(PhGetIntegerSetting(node1->Tool->ConfirmSetting), PhGetIntegerSetting(node2->Tool->ConfirmSetting));
-            break;
-        }
+        AtpToolsCompareTool, // AT_COLUMN_TOOL
+        AtpToolsCompareAccess, // AT_COLUMN_ACCESS
+        AtpToolsCompareAuthorization, // AT_COLUMN_AUTHORIZATION
+    };
+
+    if (!PhTreeNewSortNodes(TreeNewHandle, Context->NodeList->Items, Context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), AtpToolsCompareTieBreak, Context))
+    {
+        qsort_s(Context->NodeList->Items, Context->NodeList->Count, sizeof(PVOID), AtpToolsUnsortedCompare, Context);
     }
-
-    if (result == 0)
-        result = uintptrcmp((ULONG_PTR)node1->Tool, (ULONG_PTR)node2->Tool);
-
-    return PhModifySort(result, context->SortOrder);
 }
 
 _Function_class_(PH_TN_FILTER_FUNCTION)
@@ -486,7 +544,7 @@ BOOLEAN NTAPI AtpToolsTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), AtpToolsSortFunction, context);
+                AtpToolsSortNodes(WindowHandle, context);
 
                 getChildren->Children = (PPH_TREENEW_NODE*)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;
@@ -892,43 +950,131 @@ VOID AtpRefreshAgents(
     EnableWindow(GetDlgItem(Context->WindowHandle, IDC_REVOKE_GRANTS), selectedNode != NULL);
 }
 
-int __cdecl AtpAgentsSortFunction(
+static LONG NTAPI AtpAgentsCompareUser(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_AGENT_NODE node1 = Node1;
+    PAT_AGENT_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return PhCompareString(node1->UserText, node2->UserText, TRUE);
+}
+
+static LONG NTAPI AtpAgentsCompareClient(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_AGENT_NODE node1 = Node1;
+    PAT_AGENT_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return PhCompareString(node1->ClientText, node2->ClientText, TRUE);
+}
+
+static LONG NTAPI AtpAgentsCompareLauncher(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_AGENT_NODE node1 = Node1;
+    PAT_AGENT_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return PhCompareString(node1->LauncherText, node2->LauncherText, TRUE);
+}
+
+static LONG NTAPI AtpAgentsCompareCalls(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_AGENT_NODE node1 = Node1;
+    PAT_AGENT_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return uintcmp(node1->CallCount, node2->CallCount);
+}
+
+static LONG NTAPI AtpAgentsCompareGrants(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_AGENT_NODE node1 = Node1;
+    PAT_AGENT_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return PhCompareString(node1->GrantsText, node2->GrantsText, TRUE);
+}
+
+static LONG NTAPI AtpAgentsCompareTieBreak(
+    _In_ PVOID Node1,
+    _In_ PVOID Node2,
+    _In_ PH_SORT_ORDER SortOrder,
+    _In_opt_ PVOID Context
+    )
+{
+    PAT_AGENT_NODE node1 = Node1;
+    PAT_AGENT_NODE node2 = Node2;
+
+    UNREFERENCED_PARAMETER(SortOrder);
+    UNREFERENCED_PARAMETER(Context);
+
+    return uintcmp(node1->ConnectionId, node2->ConnectionId);
+}
+
+static int __cdecl AtpAgentsUnsortedCompare(
     _In_ void* Context,
     _In_ const void* Elem1,
     _In_ const void* Elem2
     )
 {
-    PAT_AGENTS_CONTEXT context = Context;
-    PAT_AGENT_NODE node1 = *(PAT_AGENT_NODE*)Elem1;
-    PAT_AGENT_NODE node2 = *(PAT_AGENT_NODE*)Elem2;
-    int result = 0;
+    return AtpAgentsCompareTieBreak(*(PVOID*)Elem1, *(PVOID*)Elem2, NoSortOrder, Context);
+}
 
-    if (context->SortOrder != NoSortOrder)
+static VOID AtpAgentsSortNodes(
+    _In_ HWND TreeNewHandle,
+    _In_ PAT_AGENTS_CONTEXT Context
+    )
+{
+    static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
     {
-        switch (context->SortColumn)
-        {
-        case AT_AGENT_COLUMN_USER:
-            result = PhCompareString(node1->UserText, node2->UserText, TRUE);
-            break;
-        case AT_AGENT_COLUMN_CLIENT:
-            result = PhCompareString(node1->ClientText, node2->ClientText, TRUE);
-            break;
-        case AT_AGENT_COLUMN_LAUNCHER:
-            result = PhCompareString(node1->LauncherText, node2->LauncherText, TRUE);
-            break;
-        case AT_AGENT_COLUMN_CALLS:
-            result = uintcmp(node1->CallCount, node2->CallCount);
-            break;
-        case AT_AGENT_COLUMN_GRANTS:
-            result = PhCompareString(node1->GrantsText, node2->GrantsText, TRUE);
-            break;
-        }
+        NULL, // AT_AGENT_COLUMN_ID
+        AtpAgentsCompareUser, // AT_AGENT_COLUMN_USER
+        AtpAgentsCompareClient, // AT_AGENT_COLUMN_CLIENT
+        AtpAgentsCompareLauncher, // AT_AGENT_COLUMN_LAUNCHER
+        NULL, // AT_AGENT_COLUMN_CONNECTED
+        AtpAgentsCompareCalls, // AT_AGENT_COLUMN_CALLS
+        AtpAgentsCompareGrants, // AT_AGENT_COLUMN_GRANTS
+    };
+
+    if (!PhTreeNewSortNodes(TreeNewHandle, Context->NodeList->Items, Context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), AtpAgentsCompareTieBreak, Context))
+    {
+        qsort_s(Context->NodeList->Items, Context->NodeList->Count, sizeof(PVOID), AtpAgentsUnsortedCompare, Context);
     }
-
-    if (result == 0)
-        result = uintcmp(node1->ConnectionId, node2->ConnectionId);
-
-    return PhModifySort(result, context->SortOrder);
 }
 
 BOOLEAN NTAPI AtpAgentsTreeNewCallback(
@@ -952,7 +1098,7 @@ BOOLEAN NTAPI AtpAgentsTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), AtpAgentsSortFunction, context);
+                AtpAgentsSortNodes(WindowHandle, context);
 
                 getChildren->Children = (PPH_TREENEW_NODE*)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

@@ -692,23 +692,25 @@ PPH_STRING PhpFormatSizeIfNonZero(
 }
 
 #define SORT_FUNCTION(Column) PhpMemoryTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpMemoryTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpMemoryTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPH_MEMORY_NODE node1 = *(PPH_MEMORY_NODE *)_elem1; \
-    PPH_MEMORY_NODE node2 = *(PPH_MEMORY_NODE *)_elem2; \
+    PPH_MEMORY_NODE node1 = (PPH_MEMORY_NODE)_node1; \
+    PPH_MEMORY_NODE node2 = (PPH_MEMORY_NODE)_node2; \
     PPH_MEMORY_ITEM memoryItem1 = node1->MemoryItem; \
     PPH_MEMORY_ITEM memoryItem2 = node2->MemoryItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhCmSortNodes (see the post-sort function).
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)memoryItem1->BaseAddress, (ULONG_PTR)memoryItem2->BaseAddress); \
-    \
-    return PhModifySort(sortResult, ((PPH_MEMORY_LIST_CONTEXT)_context)->TreeNewSortOrder); \
+    return sortResult; \
 }
 
 _Function_class_(PH_CM_POST_SORT_FUNCTION)
@@ -884,7 +886,7 @@ BOOLEAN NTAPI PhpMemoryTreeNewCallback(
             {
                 if (!node)
                 {
-                    static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                    static CONST PPH_CM_COMPARE_FUNCTION sortFunctions[] =
                     {
                         SORT_FUNCTION(BaseAddress),
                         SORT_FUNCTION(Type),
@@ -905,32 +907,13 @@ BOOLEAN NTAPI PhpMemoryTreeNewCallback(
                         SORT_FUNCTION(RegionType),
                         SORT_FUNCTION(Priority),
                     };
-                    _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == PHMMTLC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                    if (!PhCmForwardSort(
-                        (PPH_TREENEW_NODE *)context->RegionNodeList->Items,
-                        context->RegionNodeList->Count,
-                        context->TreeNewSortColumn,
-                        context->TreeNewSortOrder,
-                        &context->Cm
-                        ))
-                    {
-                        if (context->TreeNewSortColumn < PHMMTLC_MAXIMUM)
-                            sortFunction = sortFunctions[context->TreeNewSortColumn];
-                        else
-                            sortFunction = NULL;
-                    }
-                    else
-                    {
-                        sortFunction = NULL;
-                    }
+                    if (!context->Cm.SortFunctions)
+                        PhCmRegisterSortFunctions(&context->Cm, sortFunctions, RTL_NUMBER_OF(sortFunctions), context);
 
-                    if (sortFunction)
-                    {
-                        qsort_s(context->RegionNodeList->Items, context->RegionNodeList->Count, sizeof(PVOID), sortFunction, context);
-                    }
+                    PhCmSortNodes(&context->Cm, (PPH_TREENEW_NODE *)context->RegionNodeList->Items, context->RegionNodeList->Count);
 
                     getChildren->Children = (PPH_TREENEW_NODE *)context->RegionNodeList->Items;
                     getChildren->NumberOfChildren = context->RegionNodeList->Count;

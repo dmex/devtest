@@ -35,6 +35,7 @@ typedef struct _DEVICE_TREE_SORT_CONTEXT
 {
     ULONG SortColumn;
     PH_SORT_ORDER SortOrder;
+    PH_TREENEW_SORT_KEYS SortKeys; // Keys used for sorting (primary first).
 } DEVICE_TREE_SORT_CONTEXT, *PDEVICE_TREE_SORT_CONTEXT;
 
 static BOOLEAN AutoRefreshDeviceTree = TRUE;
@@ -464,26 +465,25 @@ VOID NTAPI DeviceTreeSearchChangedHandler(
         PhApplyTreeNewFilters(&DeviceTreeFilterSupport);
 }
 
-static int __cdecl DeviceTreeSortFunction(
-    void* Context,
-    const void* Left,
-    const void* Right
+/**
+ * Compares two device nodes by a single property column. Returns the raw
+ * ascending result.
+ */
+static LONG DeviceTreeCompareProperty(
+    _In_ PDEVICE_NODE lhsNode,
+    _In_ PDEVICE_NODE rhsNode,
+    _In_ ULONG Column
     )
 {
-    PDEVICE_TREE_SORT_CONTEXT context = Context;
-    int sortResult;
-    PDEVICE_NODE lhsNode;
-    PDEVICE_NODE rhsNode;
+    LONG sortResult;
     PPH_DEVICE_PROPERTY lhs;
     PPH_DEVICE_PROPERTY rhs;
     PH_STRINGREF srl;
     PH_STRINGREF srr;
 
     sortResult = 0;
-    lhsNode = *(PDEVICE_NODE*)Left;
-    rhsNode = *(PDEVICE_NODE*)Right;
-    lhs = PhGetDeviceProperty(lhsNode->DeviceItem, context->SortColumn);
-    rhs = PhGetDeviceProperty(rhsNode->DeviceItem, context->SortColumn);
+    lhs = PhGetDeviceProperty(lhsNode->DeviceItem, Column);
+    rhs = PhGetDeviceProperty(rhsNode->DeviceItem, Column);
 
     assert(lhs->Type == rhs->Type);
 
@@ -554,14 +554,78 @@ static int __cdecl DeviceTreeSortFunction(
         }
     }
 
-    if (sortResult == 0)
+    return sortResult;
+}
+
+static int __cdecl DeviceTreeSortFunction(
+    void* Context,
+    const void* Left,
+    const void* Right
+    )
+{
+    PDEVICE_TREE_SORT_CONTEXT context = Context;
+    PDEVICE_NODE lhsNode = *(PDEVICE_NODE*)Left;
+    PDEVICE_NODE rhsNode = *(PDEVICE_NODE*)Right;
+    PH_STRINGREF srl;
+    PH_STRINGREF srr;
+    LONG sortResult;
+    ULONG i;
+
+    for (i = 0; i < context->SortKeys.Count; i++)
     {
-        srl = PhGetStringRef(lhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
-        srr = PhGetStringRef(rhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
-        sortResult = PhCompareStringRef(&srl, &srr, TRUE);
+        sortResult = DeviceTreeCompareProperty(lhsNode, rhsNode, context->SortKeys.Keys[i].Column);
+
+        if (sortResult != 0)
+            return PhModifySort(sortResult, context->SortKeys.Keys[i].Order);
     }
 
-    return PhModifySort(sortResult, context->SortOrder);
+    // All keys are equal; break ties by name in the primary key's direction.
+    srl = PhGetStringRef(lhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
+    srr = PhGetStringRef(rhsNode->DeviceItem->Properties[PhDevicePropertyName].AsString);
+    sortResult = PhCompareStringRef(&srl, &srr, TRUE);
+
+    return PhModifySort(sortResult, context->SortKeys.Keys[0].Order);
+}
+
+/**
+ * Fills in the sort keys of a sort context. Uses all of the control's sort
+ * keys when the context matches the control's sort, otherwise the single
+ * column chosen by the caller (in ascending order when the list is unsorted).
+ */
+static VOID DeviceTreeInitializeSortKeys(
+    _In_ HWND TreeNewHandle,
+    _Inout_ PDEVICE_TREE_SORT_CONTEXT Context
+    )
+{
+    PH_TREENEW_SORT_KEYS sortKeys;
+    ULONG i;
+
+    memset(&Context->SortKeys, 0, sizeof(PH_TREENEW_SORT_KEYS));
+
+    if (
+        Context->SortColumn == DeviceTreeSortColumn &&
+        Context->SortOrder == DeviceTreeSortOrder &&
+        Context->SortOrder != NoSortOrder &&
+        TreeNew_GetSortKeys(TreeNewHandle, &sortKeys)
+        )
+    {
+        // Sort by all of the control's sort keys.
+    }
+    else
+    {
+        memset(&sortKeys, 0, sizeof(PH_TREENEW_SORT_KEYS));
+        sortKeys.Count = 1;
+        sortKeys.Keys[0].Column = Context->SortColumn;
+        sortKeys.Keys[0].Order = Context->SortOrder != NoSortOrder ? Context->SortOrder : AscendingSortOrder;
+    }
+
+    for (i = 0; i < sortKeys.Count && i < PH_TREENEW_MAX_SORT_KEYS; i++)
+    {
+        if (sortKeys.Keys[i].Order == NoSortOrder || sortKeys.Keys[i].Column >= PhMaxDeviceProperty)
+            continue;
+
+        Context->SortKeys.Keys[Context->SortKeys.Count++] = sortKeys.Keys[i];
+    }
 }
 
 VOID DeviceNodeShowProperties(
@@ -721,7 +785,9 @@ BOOLEAN NTAPI DeviceTreeCallback(
 
                 if (sortList)
                 {
-                    if (sortContext.SortColumn < PhMaxDeviceProperty)
+                    DeviceTreeInitializeSortKeys(hwnd, &sortContext);
+
+                    if (sortContext.SortKeys.Count != 0)
                     {
                         qsort_s(
                             sortList->Items,

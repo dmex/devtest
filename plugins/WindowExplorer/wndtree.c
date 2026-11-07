@@ -890,27 +890,34 @@ VOID WepDestroyWindowNode(
 }
 
 #define SORT_FUNCTION(Column) WepWindowTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl WepWindowTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI WepWindowTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PWE_WINDOW_TREE_CONTEXT context = (PWE_WINDOW_TREE_CONTEXT)_context; \
-    PWE_WINDOW_NODE node1 = *(PWE_WINDOW_NODE *)_elem1; \
-    PWE_WINDOW_NODE node2 = *(PWE_WINDOW_NODE *)_elem2; \
-    int sortResult = 0;
+    PWE_WINDOW_NODE node1 = (PWE_WINDOW_NODE)_node1; \
+    PWE_WINDOW_NODE node2 = (PWE_WINDOW_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintcmp(node1->WindowIndex, node2->WindowIndex); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uintcmp(node1->WindowIndex, node2->WindowIndex);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Class)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->WindowItem->WindowClassText, node2->WindowItem->WindowClassText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->WindowItem->WindowClassText, node2->WindowItem->WindowClassText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -919,6 +926,27 @@ BEGIN_SORT_FUNCTION(Handle)
     sortResult = uintptrcmp((ULONG_PTR)node1->WindowHandle, (ULONG_PTR)node2->WindowHandle);
 }
 END_SORT_FUNCTION
+
+/**
+ * qsort_s adapter for the unsorted parent/child view, which orders root windows by handle.
+ */
+static int __cdecl WepWindowTreeNewCompareHandleUnsorted(
+    _In_ void *_context,
+    _In_ const void *_elem1,
+    _In_ const void *_elem2
+    )
+{
+    PVOID node1 = *(PVOID *)_elem1;
+    PVOID node2 = *(PVOID *)_elem2;
+    LONG result;
+
+    result = SORT_FUNCTION(Handle)(node1, node2, NoSortOrder, _context);
+
+    if (result == 0)
+        result = SORT_FUNCTION(TieBreak)(node1, node2, NoSortOrder, _context);
+
+    return result;
+}
 
 BEGIN_SORT_FUNCTION(Index)
 {
@@ -934,7 +962,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Text)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->WindowItem->WindowText, node2->WindowItem->WindowText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->WindowItem->WindowText, node2->WindowItem->WindowText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -952,7 +980,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Module)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ModuleString, node2->ModuleString, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ModuleString, node2->ModuleString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -997,7 +1025,7 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
                             context->NodeRootList->Items,
                             context->NodeRootList->Count,
                             sizeof(PVOID),
-                            WepWindowTreeNewCompareHandle,
+                            WepWindowTreeNewCompareHandleUnsorted,
                             context
                             );
                     }
@@ -1019,7 +1047,7 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
             {
                 if (!node)
                 {
-                    static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                    static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                     {
                         SORT_FUNCTION(Class),
                         SORT_FUNCTION(Handle),
@@ -1028,19 +1056,10 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
                         SORT_FUNCTION(Thread),
                         SORT_FUNCTION(Module)
                     };
-                    _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == WEWNTLC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                    if (context->TreeNewSortColumn < WEWNTLC_MAXIMUM)
-                        sortFunction = sortFunctions[context->TreeNewSortColumn];
-                    else
-                        sortFunction = NULL;
-
-                    if (sortFunction)
-                    {
-                        qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                    }
+                    PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                     getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                     getChildren->NumberOfChildren = context->NodeList->Count;

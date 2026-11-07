@@ -850,25 +850,34 @@ VOID FwUpdateServiceSid(
 }
 
 #define SORT_FUNCTION(Column) FwTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl FwTreeNewCompare##Column( \
-    _In_ void const* _elem1, \
-    _In_ void const* _elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI FwTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PFW_EVENT_ITEM node1 = *(PFW_EVENT_ITEM *)_elem1; \
-    PFW_EVENT_ITEM node2 = *(PFW_EVENT_ITEM *)_elem2; \
-    int sortResult = 0;
+    PFW_EVENT_ITEM node1 = (PFW_EVENT_ITEM)_node1; \
+    PFW_EVENT_ITEM node2 = (PFW_EVENT_ITEM)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uint64cmp(node1->Index, node2->Index); \
-    \
-    return PhModifySort(sortResult, FwTreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uint64cmp(node1->Index, node2->Index);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessBaseString, node2->ProcessBaseString, FwTreeNewSortOrder, FALSE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessBaseString, node2->ProcessBaseString, sortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -892,13 +901,13 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RuleName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->RuleName, node2->RuleName, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RuleName, node2->RuleName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RuleDescription)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->RuleDescription, node2->RuleDescription, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RuleDescription, node2->RuleDescription, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -950,7 +959,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalHostname)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->LocalHostnameString, node2->LocalHostnameString, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->LocalHostnameString, node2->LocalHostnameString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1002,7 +1011,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteHostname)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteHostnameString, node2->RemoteHostnameString, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteHostnameString, node2->RemoteHostnameString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1023,7 +1032,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Filename)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessFileName, node2->ProcessFileName, FwTreeNewSortOrder, FALSE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessFileName, node2->ProcessFileName, sortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -1032,7 +1041,7 @@ BEGIN_SORT_FUNCTION(User)
     FwUpdateNodeUserSid(node1);
     FwUpdateNodeUserSid(node2);
 
-    sortResult = PhCompareStringWithNullSortOrder(node1->UserName, node2->UserName, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->UserName, node2->UserName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1044,7 +1053,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Country)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteCountryName, node2->RemoteCountryName, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteCountryName, node2->RemoteCountryName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1077,7 +1086,7 @@ BEGIN_SORT_FUNCTION(LocalPortServiceName)
     FwUpdateNodeLocalPortServiceName(node1);
     FwUpdateNodeLocalPortServiceName(node2);
 
-    sortResult = PhCompareStringRefWithNullSortOrder(node1->LocalPortServiceName, node2->LocalPortServiceName, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringRefWithNullSortOrder(node1->LocalPortServiceName, node2->LocalPortServiceName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1086,13 +1095,13 @@ BEGIN_SORT_FUNCTION(RemotePortServiceName)
     FwUpdateNodeRemotePortServiceName(node1);
     FwUpdateNodeRemotePortServiceName(node2);
 
-    sortResult = PhCompareStringRefWithNullSortOrder(node1->RemotePortServiceName, node2->RemotePortServiceName, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringRefWithNullSortOrder(node1->RemotePortServiceName, node2->RemotePortServiceName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(FilterOrigin)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->FilterOrigin, node2->FilterOrigin, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->FilterOrigin, node2->FilterOrigin, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1110,19 +1119,19 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(PolicyAppId)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->PolicyAppId, node2->PolicyAppId, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->PolicyAppId, node2->PolicyAppId, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(ServiceSids)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ServiceSids, node2->ServiceSids, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ServiceSids, node2->ServiceSids, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(FqbnName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->FqbnName, node2->FqbnName, FwTreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->FqbnName, node2->FqbnName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1183,7 +1192,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
             {
                 if (!getChildren->Node)
                 {
-                    static CONST _CoreCrtNonSecureSearchSortCompareFunction sortFunctions[] =
+                    static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                     {
                         SORT_FUNCTION(Name),
                         SORT_FUNCTION(ProcessId),
@@ -1217,19 +1226,10 @@ BOOLEAN NTAPI FwTreeNewCallback(
                         SORT_FUNCTION(ServiceSids),
                         SORT_FUNCTION(FqbnName),
                     };
-                    _CoreCrtNonSecureSearchSortCompareFunction sortFunction;
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == FW_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
-                    if (FwTreeNewSortColumn < FW_COLUMN_MAXIMUM)
-                        sortFunction = sortFunctions[FwTreeNewSortColumn];
-                    else
-                        sortFunction = NULL;
-
-                    if (sortFunction)
-                    {
-                        qsort(FwNodeList->Items, FwNodeList->Count, sizeof(PVOID), sortFunction);
-                    }
+                    PhTreeNewSortNodes(WindowHandle, FwNodeList->Items, FwNodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), NULL);
 
                     getChildren->Children = (PPH_TREENEW_NODE*)FwNodeList->Items;
                     getChildren->NumberOfChildren = FwNodeList->Count;

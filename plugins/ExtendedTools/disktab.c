@@ -525,29 +525,39 @@ VOID EtTickDiskNodes(
 }
 
 #define SORT_FUNCTION(Column) EtpDiskTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl EtpDiskTreeNewCompare##Column( \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI EtpDiskTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PET_DISK_NODE node1 = *(PET_DISK_NODE *)_elem1; \
-    PET_DISK_NODE node2 = *(PET_DISK_NODE *)_elem2; \
+    PET_DISK_NODE node1 = (PET_DISK_NODE)_node1; \
+    PET_DISK_NODE node2 = (PET_DISK_NODE)_node2; \
     PET_DISK_ITEM diskItem1 = node1->DiskItem; \
     PET_DISK_ITEM diskItem2 = node2->DiskItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0 && diskItem1->FileName && diskItem2->FileName) \
-        sortResult = PhCompareString(diskItem1->FileName, diskItem2->FileName, FALSE); \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)diskItem1->FileObject, (ULONG_PTR)diskItem2->FileObject); \
-    \
-    return PhModifySort(sortResult, DiskTreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    if (sortResult == 0 && diskItem1->FileName && diskItem2->FileName)
+        sortResult = PhCompareString(diskItem1->FileName, diskItem2->FileName, FALSE);
+    if (sortResult == 0)
+        sortResult = uintptrcmp((ULONG_PTR)diskItem1->FileObject, (ULONG_PTR)diskItem2->FileObject);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Process)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessNameText, node2->ProcessNameText, DiskTreeNewSortOrder, FALSE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessNameText, node2->ProcessNameText, sortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -559,7 +569,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(File)
 {
-    sortResult = PhCompareStringWithNullSortOrder(diskItem1->FileName, diskItem2->FileName, DiskTreeNewSortOrder, FALSE);
+    sortResult = PhCompareStringWithNullSortOrder(diskItem1->FileName, diskItem2->FileName, sortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -646,7 +656,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(OriginalFile)
 {
-    sortResult = PhCompareStringWithNullSortOrder(diskItem1->FileName, diskItem2->FileName, DiskTreeNewSortOrder, FALSE);
+    sortResult = PhCompareStringWithNullSortOrder(diskItem1->FileName, diskItem2->FileName, sortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -677,7 +687,7 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtNonSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Process),
                     SORT_FUNCTION(Pid),
@@ -695,19 +705,10 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
                     SORT_FUNCTION(WriteBytes),
                     SORT_FUNCTION(TotalBytes),
                 };
-                _CoreCrtNonSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == ETDSTNC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (DiskTreeNewSortColumn < ETDSTNC_MAXIMUM)
-                    sortFunction = sortFunctions[DiskTreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                if (sortFunction)
-                {
-                    qsort(DiskNodeList->Items, DiskNodeList->Count, sizeof(PVOID), sortFunction);
-                }
+                PhTreeNewSortNodes(WindowHandle, DiskNodeList->Items, DiskNodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), NULL);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)DiskNodeList->Items;
                 getChildren->NumberOfChildren = DiskNodeList->Count;

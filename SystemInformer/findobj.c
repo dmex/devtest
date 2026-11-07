@@ -120,39 +120,46 @@ typedef struct _PH_HANDLE_OBJECT_TREE_ROOT_NODE
 } PH_HANDLE_OBJECT_TREE_ROOT_NODE, *PPH_HANDLE_OBJECT_TREE_ROOT_NODE;
 
 #define SORT_FUNCTION(Column) PhpHandleObjectTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpHandleObjectTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpHandleObjectTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PPH_HANDLE_SEARCH_CONTEXT context = ((PPH_HANDLE_SEARCH_CONTEXT)_context); \
-    PPH_HANDLE_OBJECT_TREE_ROOT_NODE node1 = *(PPH_HANDLE_OBJECT_TREE_ROOT_NODE*)_elem1; \
-    PPH_HANDLE_OBJECT_TREE_ROOT_NODE node2 = *(PPH_HANDLE_OBJECT_TREE_ROOT_NODE*)_elem2; \
-    int sortResult = 0;
+    PPH_HANDLE_OBJECT_TREE_ROOT_NODE node1 = (PPH_HANDLE_OBJECT_TREE_ROOT_NODE)_node1; \
+    PPH_HANDLE_OBJECT_TREE_ROOT_NODE node2 = (PPH_HANDLE_OBJECT_TREE_ROOT_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)node1->UniqueId, (ULONG_PTR)node2->UniqueId); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uintptrcmp((ULONG_PTR)node1->UniqueId, (ULONG_PTR)node2->UniqueId);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Process)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ClientIdName, node2->ClientIdName, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ClientIdName, node2->ClientIdName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Type)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->TypeNameString, node2->TypeNameString, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->TypeNameString, node2->TypeNameString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->BestObjectName, node2->BestObjectName, context->TreeNewSortOrder, FALSE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->BestObjectName, node2->BestObjectName, sortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -170,13 +177,13 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(OriginalName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->ObjectNameString, node2->ObjectNameString, context->TreeNewSortOrder, FALSE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ObjectNameString, node2->ObjectNameString, sortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(GrantedAccess)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->GrantedAccessSymbolicText, node2->GrantedAccessSymbolicText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->GrantedAccessSymbolicText, node2->GrantedAccessSymbolicText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -331,7 +338,7 @@ BOOLEAN NTAPI PhpHandleObjectTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Process),
                     SORT_FUNCTION(Type),
@@ -341,19 +348,10 @@ BOOLEAN NTAPI PhpHandleObjectTreeNewCallback(
                     SORT_FUNCTION(OriginalName),
                     SORT_FUNCTION(GrantedAccess),
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PH_OBJECT_SEARCH_TREE_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortColumn < PH_OBJECT_SEARCH_TREE_COLUMN_MAXIMUM)
-                    sortFunction = sortFunctions[context->TreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

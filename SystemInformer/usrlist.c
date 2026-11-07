@@ -450,19 +450,23 @@ BOOLEAN PhpGetSelectedUserListNodes(
 }
 
 #define SORT_FUNCTION(Column) PvpUserListTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PvpUserListTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PvpUserListTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPH_USER_NODE node1 = *(PPH_USER_NODE *)_elem1; \
-    PPH_USER_NODE node2 = *(PPH_USER_NODE *)_elem2; \
-    PPH_USER_LIST_CONTEXT context = _context;
-    int sortResult = 0;
+    PPH_USER_NODE node1 = (PPH_USER_NODE)_node1; \
+    PPH_USER_NODE node2 = (PPH_USER_NODE)_node2; \
+    PPH_USER_LIST_CONTEXT context = _context; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
 
 BEGIN_SORT_FUNCTION(LogonId)
@@ -476,7 +480,7 @@ BEGIN_SORT_FUNCTION(UserName)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->UserName,
         node2->UserName,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -487,7 +491,7 @@ BEGIN_SORT_FUNCTION(LogonDomain)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->LogonDomain,
         node2->LogonDomain,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -498,7 +502,7 @@ BEGIN_SORT_FUNCTION(AuthenticationPackage)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->AuthenticationPackage,
         node2->AuthenticationPackage,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -521,7 +525,7 @@ BEGIN_SORT_FUNCTION(Sid)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->Sid,
         node2->Sid,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -538,7 +542,7 @@ BEGIN_SORT_FUNCTION(LogonServer)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->LogonServer,
         node2->LogonServer,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -549,7 +553,7 @@ BEGIN_SORT_FUNCTION(DnsDomainName)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->DnsDomainName,
         node2->DnsDomainName,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -560,7 +564,7 @@ BEGIN_SORT_FUNCTION(UserPrincipalName)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->UserPrincipalName,
         node2->UserPrincipalName,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -595,7 +599,7 @@ BEGIN_SORT_FUNCTION(LogonScript)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->LogonScript,
         node2->LogonScript,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -606,7 +610,7 @@ BEGIN_SORT_FUNCTION(ProfilePath)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->ProfilePath,
         node2->ProfilePath,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -617,7 +621,7 @@ BEGIN_SORT_FUNCTION(HomeDirectory)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->HomeDirectory,
         node2->HomeDirectory,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -628,7 +632,7 @@ BEGIN_SORT_FUNCTION(HomeDirectoryDrive)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->HomeDirectoryDrive,
         node2->HomeDirectoryDrive,
-        context->TreeNewSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -685,7 +689,7 @@ BOOLEAN NTAPI PhpUserListTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(LogonId),
                     SORT_FUNCTION(UserName),
@@ -713,19 +717,10 @@ BOOLEAN NTAPI PhpUserListTreeNewCallback(
                     SORT_FUNCTION(PasswordMustChange),
 
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PH_USER_LIST_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortColumn < PH_USER_LIST_COLUMN_MAXIMUM)
-                    sortFunction = sortFunctions[context->TreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), NULL, context);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

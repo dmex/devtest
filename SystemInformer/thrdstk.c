@@ -364,23 +364,30 @@ VOID PhpApplyThreadStackFrames(
     );
 
 #define SORT_FUNCTION(Column) ThreadStackTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl ThreadStackTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI ThreadStackTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PPH_THREAD_STACK_CONTEXT context = ((PPH_THREAD_STACK_CONTEXT)_context); \
-    PPH_STACK_TREE_ROOT_NODE node1 = *(PPH_STACK_TREE_ROOT_NODE*)_elem1; \
-    PPH_STACK_TREE_ROOT_NODE node2 = *(PPH_STACK_TREE_ROOT_NODE*)_elem2; \
-    int sortResult = 0;
+    PPH_STACK_TREE_ROOT_NODE node1 = (PPH_STACK_TREE_ROOT_NODE)_node1; \
+    PPH_STACK_TREE_ROOT_NODE node2 = (PPH_STACK_TREE_ROOT_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)node1->Node.Index, (ULONG_PTR)node2->Node.Index); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uintptrcmp((ULONG_PTR)node1->Node.Index, (ULONG_PTR)node2->Node.Index);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Index)
 {
@@ -390,7 +397,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Symbol)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->SymbolString, node2->SymbolString, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->SymbolString, node2->SymbolString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -444,13 +451,13 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(FileName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->FileNameString, node2->FileNameString, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->FileNameString, node2->FileNameString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LineText)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->LineTextString, node2->LineTextString, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->LineTextString, node2->LineTextString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -469,7 +476,7 @@ END_SORT_FUNCTION
 #define STRING_SORT_FUNCTION(Name, Field) \
 BEGIN_SORT_FUNCTION(Name) \
 { \
-    sortResult = PhCompareStringWithNullSortOrder(node1->Field, node2->Field, context->TreeNewSortOrder, TRUE); \
+    sortResult = PhCompareStringWithNullSortOrder(node1->Field, node2->Field, sortOrder, TRUE); \
 } \
 END_SORT_FUNCTION
 
@@ -633,7 +640,7 @@ BOOLEAN NTAPI ThreadStackTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Index),
                     SORT_FUNCTION(Symbol),
@@ -657,19 +664,10 @@ BOOLEAN NTAPI ThreadStackTreeNewCallback(
                     SORT_FUNCTION(Language),
                     SORT_FUNCTION(ShadowStack),
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
-                    sortFunction = sortFunctions[context->TreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

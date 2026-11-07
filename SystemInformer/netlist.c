@@ -395,22 +395,25 @@ VOID PhTickNetworkNodes(
 }
 
 #define SORT_FUNCTION(Column) PhpNetworkTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpNetworkTreeNewCompare##Column( \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpNetworkTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPH_NETWORK_NODE node1 = *(PPH_NETWORK_NODE *)_elem1; \
-    PPH_NETWORK_NODE node2 = *(PPH_NETWORK_NODE *)_elem2; \
+    PPH_NETWORK_NODE node1 = (PPH_NETWORK_NODE)_node1; \
+    PPH_NETWORK_NODE node2 = (PPH_NETWORK_NODE)_node2; \
     PPH_NETWORK_ITEM networkItem1 = node1->NetworkItem; \
     PPH_NETWORK_ITEM networkItem2 = node2->NetworkItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhCmSortNodes (see the post-sort function).
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uint64cmp(node1->UniqueId, node2->UniqueId); \
-    \
-    return PhModifySort(sortResult, NetworkTreeListSortOrder); \
+    return sortResult; \
 }
 
 _Function_class_(PH_CM_POST_SORT_FUNCTION)
@@ -481,7 +484,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalHostname)
 {
-    sortResult = PhCompareStringWithNullSortOrder(networkItem1->LocalHostString, networkItem2->LocalHostString, NetworkTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(networkItem1->LocalHostString, networkItem2->LocalHostString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -533,7 +536,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteHostname)
 {
-    sortResult = PhCompareStringWithNullSortOrder(networkItem1->RemoteHostString, networkItem2->RemoteHostString, NetworkTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(networkItem1->RemoteHostString, networkItem2->RemoteHostString, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -573,7 +576,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Owner)
 {
-    sortResult = PhCompareStringWithNullSortOrder(networkItem1->OwnerName, networkItem2->OwnerName, NetworkTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(networkItem1->OwnerName, networkItem2->OwnerName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -585,7 +588,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(HvService)
 {
-    sortResult = PhCompareStringWithNullSortOrder(networkItem1->HvService, networkItem2->HvService, NetworkTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(networkItem1->HvService, networkItem2->HvService, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -610,7 +613,7 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtNonSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_CM_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Process),
                     SORT_FUNCTION(Pid),
@@ -627,28 +630,13 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
                     SORT_FUNCTION(TimeStamp),
                     SORT_FUNCTION(HvService),
                 };
-                _CoreCrtNonSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PHNETLC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (!PhCmForwardSort(
-                    (PPH_TREENEW_NODE *)NetworkNodeList->Items,
-                    NetworkNodeList->Count,
-                    NetworkTreeListSortColumn,
-                    NetworkTreeListSortOrder,
-                    &NetworkTreeListCm
-                    ))
-                {
-                    if (NetworkTreeListSortColumn < PHNETLC_MAXIMUM)
-                        sortFunction = sortFunctions[NetworkTreeListSortColumn];
-                    else
-                        sortFunction = NULL;
+                if (!NetworkTreeListCm.SortFunctions)
+                    PhCmRegisterSortFunctions(&NetworkTreeListCm, sortFunctions, RTL_NUMBER_OF(sortFunctions), NULL);
 
-                    if (sortFunction)
-                    {
-                        qsort(NetworkNodeList->Items, NetworkNodeList->Count, sizeof(PVOID), sortFunction);
-                    }
-                }
+                PhCmSortNodes(&NetworkTreeListCm, (PPH_TREENEW_NODE *)NetworkNodeList->Items, NetworkNodeList->Count);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)NetworkNodeList->Items;
                 getChildren->NumberOfChildren = NetworkNodeList->Count;

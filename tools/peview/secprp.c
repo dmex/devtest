@@ -391,18 +391,23 @@ VOID PvDestroyCertificateNode(
 }
 
 #define SORT_FUNCTION(Column) PvCertificateTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PvCertificateTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PvCertificateTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPV_CERTIFICATE_NODE node1 = *(PPV_CERTIFICATE_NODE *)_elem1; \
-    PPV_CERTIFICATE_NODE node2 = *(PPV_CERTIFICATE_NODE *)_elem2; \
-    int sortResult = 0;
+    PPV_CERTIFICATE_NODE node1 = (PPV_CERTIFICATE_NODE)_node1; \
+    PPV_CERTIFICATE_NODE node2 = (PPV_CERTIFICATE_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    return PhModifySort(sortResult, ((PPV_PE_CERTIFICATE_CONTEXT)_context)->TreeNewSortOrder); \
+    return sortResult; \
 }
 
 BEGIN_SORT_FUNCTION(Name)
@@ -425,7 +430,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Issuer)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->Issuer, node2->Issuer, ((PPV_PE_CERTIFICATE_CONTEXT)_context)->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->Issuer, node2->Issuer, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -443,7 +448,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Thumbprint)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->Thumbprint, node2->Thumbprint, ((PPV_PE_CERTIFICATE_CONTEXT)_context)->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->Thumbprint, node2->Thumbprint, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -455,25 +460,25 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Alg)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->Algorithm, node2->Algorithm, ((PPV_PE_CERTIFICATE_CONTEXT)_context)->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->Algorithm, node2->Algorithm, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Pin)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->SubjectPublicKeyInfo, node2->SubjectPublicKeyInfo, ((PPV_PE_CERTIFICATE_CONTEXT)_context)->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->SubjectPublicKeyInfo, node2->SubjectPublicKeyInfo, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(SpcProgramName)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->SpcProgramName, node2->SpcProgramName, ((PPV_PE_CERTIFICATE_CONTEXT)_context)->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->SpcProgramName, node2->SpcProgramName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(SpcUrl)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->SpcUrl, node2->SpcUrl, ((PPV_PE_CERTIFICATE_CONTEXT)_context)->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->SpcUrl, node2->SpcUrl, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -512,7 +517,7 @@ BOOLEAN NTAPI PvCertificateTreeNewCallback(
             {
                 if (!node)
                 {
-                    static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                    static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                     {
                         SORT_FUNCTION(Name),
                         SORT_FUNCTION(Index),
@@ -527,19 +532,10 @@ BOOLEAN NTAPI PvCertificateTreeNewCallback(
                         SORT_FUNCTION(SpcProgramName),
                         SORT_FUNCTION(SpcUrl)
                     };
-                    _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == PV_CERTIFICATE_TREE_COLUMN_NAME_MAXIMUM, "SortFunctions must equal maximum.");
 
-                    if (context->TreeNewSortColumn < PV_CERTIFICATE_TREE_COLUMN_NAME_MAXIMUM)
-                        sortFunction = sortFunctions[context->TreeNewSortColumn];
-                    else
-                        sortFunction = NULL;
-
-                    if (sortFunction)
-                    {
-                        qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                    }
+                    PhTreeNewSortNodes(hwnd, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), NULL, context);
 
                     getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                     getChildren->NumberOfChildren = context->NodeList->Count;

@@ -400,48 +400,65 @@ CleanupExit:
         PhDereferenceObject(columnHashtable);
     }
 
-    // Load sort settings.
+    // Load sort settings. Format: "col,order[|col,order...]" (primary key first).
 
     if (SortSettings && SortSettings->Length != 0)
     {
-        PhSplitStringRefAtChar(SortSettings, L',', &valuePart, &subPart);
+        PH_STRINGREF remainingPart = *SortSettings;
+        PH_STRINGREF keyPart;
+        PH_TREENEW_SORT_KEYS sortKeys;
 
-        if (valuePart.Length != 0 && subPart.Length != 0)
+        memset(&sortKeys, 0, sizeof(PH_TREENEW_SORT_KEYS));
+
+        while (remainingPart.Length != 0 && sortKeys.Count < PH_TREENEW_MAX_SORT_KEYS)
         {
-            ULONG sortColumn;
-            PH_SORT_ORDER sortOrder;
+            PhSplitStringRefAtChar(&remainingPart, L'|', &keyPart, &remainingPart);
+            PhSplitStringRefAtChar(&keyPart, L',', &valuePart, &subPart);
 
-            sortColumn = ULONG_MAX;
-
-            if (valuePart.Buffer[0] == L'+')
+            if (valuePart.Length != 0 && subPart.Length != 0)
             {
-                PH_STRINGREF pluginName;
-                ULONG subId;
-                PPH_CM_COLUMN cmColumn;
+                ULONG sortColumn;
+                PH_SORT_ORDER sortOrder;
 
-                if (
-                    Manager &&
-                    PhEmParseCompoundId(&valuePart, &pluginName, &subId) &&
-                    (cmColumn = PhCmFindColumn(Manager, &pluginName, subId))
-                    )
+                sortColumn = ULONG_MAX;
+
+                if (valuePart.Buffer[0] == L'+')
                 {
-                    sortColumn = cmColumn->Id;
+                    PH_STRINGREF pluginName;
+                    ULONG subId;
+                    PPH_CM_COLUMN cmColumn;
+
+                    if (
+                        Manager &&
+                        PhEmParseCompoundId(&valuePart, &pluginName, &subId) &&
+                        (cmColumn = PhCmFindColumn(Manager, &pluginName, subId))
+                        )
+                    {
+                        sortColumn = cmColumn->Id;
+                    }
+                }
+                else
+                {
+                    PhStringToUInt64(&valuePart, 10, &integer);
+                    sortColumn = (ULONG)integer;
+                }
+
+                PhStringToUInt64(&subPart, 10, &integer);
+                sortOrder = (PH_SORT_ORDER)integer;
+
+                if (sortColumn != ULONG_MAX && sortOrder <= DescendingSortOrder)
+                {
+                    sortKeys.Keys[sortKeys.Count].Column = sortColumn;
+                    sortKeys.Keys[sortKeys.Count].Order = sortOrder;
+                    sortKeys.Count++;
                 }
             }
-            else
-            {
-                PhStringToUInt64(&valuePart, 10, &integer);
-                sortColumn = (ULONG)integer;
-            }
-
-            PhStringToUInt64(&subPart, 10, &integer);
-            sortOrder = (PH_SORT_ORDER)integer;
-
-            if (sortColumn != ULONG_MAX && sortOrder <= DescendingSortOrder)
-            {
-                TreeNew_SetSort(TreeNewHandle, sortColumn, sortOrder);
-            }
         }
+
+        if (sortKeys.Count == 1)
+            TreeNew_SetSort(TreeNewHandle, sortKeys.Keys[0].Column, sortKeys.Keys[0].Order);
+        else if (sortKeys.Count > 1)
+            TreeNew_SetSortKeys(TreeNewHandle, &sortKeys);
     }
 
     return result;
@@ -570,31 +587,37 @@ PPH_STRING PhCmSaveSettingsEx(
 
     if (SortSettings)
     {
-        ULONG sortColumn;
-        PH_SORT_ORDER sortOrder;
+        PH_TREENEW_SORT_KEYS sortKeys;
 
-        if (TreeNew_GetSort(TreeNewHandle, &sortColumn, &sortOrder))
+        if (TreeNew_GetSortKeys(TreeNewHandle, &sortKeys))
         {
-            if (sortOrder != NoSortOrder)
+            if (sortKeys.Count != 0)
             {
-                if (!Manager || sortColumn < Manager->MinId)
-                {
-                    *SortSettings = PhFormatString(L"%lu,%lu", sortColumn, sortOrder);
-                }
-                else
-                {
-                    PPH_CM_COLUMN cmColumn;
+                PH_STRING_BUILDER sortBuilder;
 
-                    if (TreeNew_GetColumn(TreeNewHandle, sortColumn, &column))
+                PhInitializeStringBuilder(&sortBuilder, 32);
+
+                for (ULONG k = 0; k < sortKeys.Count; k++)
+                {
+                    ULONG sortColumn = sortKeys.Keys[k].Column;
+                    PH_SORT_ORDER sortOrder = sortKeys.Keys[k].Order;
+
+                    if (!Manager || sortColumn < Manager->MinId)
                     {
-                        cmColumn = column.Context;
-                        *SortSettings = PhFormatString(L"+%lu,%lu", cmColumn->SubId, sortOrder);
+                        PhAppendFormatStringBuilder(&sortBuilder, L"%lu,%lu|", sortColumn, (ULONG)sortOrder);
                     }
-                    else
+                    else if (TreeNew_GetColumn(TreeNewHandle, sortColumn, &column))
                     {
-                        *SortSettings = PhReferenceEmptyString();
+                        PPH_CM_COLUMN cmColumn = column.Context;
+
+                        PhAppendFormatStringBuilder(&sortBuilder, L"+%lu,%lu|", cmColumn->SubId, (ULONG)sortOrder);
                     }
                 }
+
+                if (sortBuilder.String->Length != 0)
+                    PhRemoveEndStringBuilder(&sortBuilder, 1);
+
+                *SortSettings = PhFinalStringBuilderString(&sortBuilder);
             }
             else
             {

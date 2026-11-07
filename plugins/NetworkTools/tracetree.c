@@ -59,22 +59,30 @@ PTRACERT_ROOT_NODE TracertTreeCreateNode(
 }
 
 #define SORT_FUNCTION(Column) TracertTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl TracertTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI TracertTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PTRACERT_ROOT_NODE node1 = *(PTRACERT_ROOT_NODE*)_elem1; \
-    PTRACERT_ROOT_NODE node2 = *(PTRACERT_ROOT_NODE*)_elem2; \
-    int sortResult = 0;
+    PTRACERT_ROOT_NODE node1 = (PTRACERT_ROOT_NODE)_node1; \
+    PTRACERT_ROOT_NODE node2 = (PTRACERT_ROOT_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintcmp(node1->UniqueId, node2->UniqueId); \
-    \
-    return PhModifySort(sortResult, ((PNETWORK_TRACERT_CONTEXT)_context)->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uintcmp(node1->UniqueId, node2->UniqueId);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Ttl)
 {
@@ -320,7 +328,7 @@ BOOLEAN NTAPI TracertTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static PVOID sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Ttl),
                     SORT_FUNCTION(Ping1),
@@ -331,19 +339,10 @@ BOOLEAN NTAPI TracertTreeNewCallback(
                     SORT_FUNCTION(Hostname),
                     SORT_FUNCTION(Country),
                 };
-                int (__cdecl *sortFunction)(void *, const void *, const void *);
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
-                    sortFunction = sortFunctions[context->TreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhTreeNewSortNodes(hwnd, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

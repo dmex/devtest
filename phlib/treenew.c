@@ -10721,6 +10721,107 @@ VOID PhTnpProcessDragSelect(
     }
 }
 
+typedef struct _PH_TREENEW_MULTI_SORT_CONTEXT
+{
+    ULONG NumberOfKeys;
+    PPH_TREENEW_COMPARE_FUNCTION CompareFunctions[PH_TREENEW_MAX_SORT_KEYS];
+    PH_SORT_ORDER SortOrders[PH_TREENEW_MAX_SORT_KEYS];
+    PPH_TREENEW_COMPARE_FUNCTION TieBreakFunction;
+    PVOID Context;
+} PH_TREENEW_MULTI_SORT_CONTEXT, *PPH_TREENEW_MULTI_SORT_CONTEXT;
+
+static int __cdecl PhTnpMultiSortCompare(
+    _In_ void *context,
+    _In_ const void *elem1,
+    _In_ const void *elem2
+    )
+{
+    PPH_TREENEW_MULTI_SORT_CONTEXT sortContext = context;
+    PVOID node1 = *(PVOID *)elem1;
+    PVOID node2 = *(PVOID *)elem2;
+    LONG result;
+    ULONG i;
+
+    for (i = 0; i < sortContext->NumberOfKeys; i++)
+    {
+        result = sortContext->CompareFunctions[i](node1, node2, sortContext->SortOrders[i], sortContext->Context);
+
+        if (result != 0)
+            return PhModifySort(result, sortContext->SortOrders[i]);
+    }
+
+    // All keys are equal; use the list's stable tie-breaker in the primary key's direction.
+    if (sortContext->TieBreakFunction)
+    {
+        result = sortContext->TieBreakFunction(node1, node2, sortContext->SortOrders[0], sortContext->Context);
+        return PhModifySort(result, sortContext->SortOrders[0]);
+    }
+
+    return 0;
+}
+
+/**
+ * Sorts an array of TreeNew nodes using all of the control's current sort keys
+ * (the primary key first, then the Shift+click secondary keys).
+ *
+ * \param TreeNewHandle A handle to the TreeNew control that owns the nodes.
+ * \param Nodes An array of pointers to nodes to sort.
+ * \param NumberOfNodes The number of nodes in the array.
+ * \param CompareFunctions An array of comparison functions indexed by column ID.
+ * Entries may be NULL for columns that cannot be sorted. Each function returns the
+ * raw ascending result; the sort order of each key is applied by this function.
+ * \param NumberOfCompareFunctions The number of entries in the array.
+ * \param TieBreakFunction An optional comparison function used when all keys are
+ * equal. Its result is applied in the direction of the primary key.
+ * \param Context A context value passed to each comparison function.
+ * \return TRUE if the nodes were sorted, FALSE if there was nothing to sort by.
+ */
+BOOLEAN NTAPI PhTreeNewSortNodes(
+    _In_ HWND TreeNewHandle,
+    _Inout_updates_(NumberOfNodes) PVOID *Nodes,
+    _In_ ULONG NumberOfNodes,
+    _In_reads_(NumberOfCompareFunctions) const PPH_TREENEW_COMPARE_FUNCTION *CompareFunctions,
+    _In_ ULONG NumberOfCompareFunctions,
+    _In_opt_ PPH_TREENEW_COMPARE_FUNCTION TieBreakFunction,
+    _In_opt_ PVOID Context
+    )
+{
+    PH_TREENEW_SORT_KEYS sortKeys;
+    PH_TREENEW_MULTI_SORT_CONTEXT sortContext;
+    ULONG i;
+
+    if (NumberOfNodes < 2)
+        return FALSE;
+
+    if (!TreeNew_GetSortKeys(TreeNewHandle, &sortKeys) || sortKeys.Count == 0)
+        return FALSE;
+
+    memset(&sortContext, 0, sizeof(PH_TREENEW_MULTI_SORT_CONTEXT));
+    sortContext.TieBreakFunction = TieBreakFunction;
+    sortContext.Context = Context;
+
+    for (i = 0; i < sortKeys.Count && i < PH_TREENEW_MAX_SORT_KEYS; i++)
+    {
+        ULONG column = sortKeys.Keys[i].Column;
+
+        if (sortKeys.Keys[i].Order == NoSortOrder)
+            continue;
+        if (column >= NumberOfCompareFunctions || !CompareFunctions[column])
+            continue;
+
+        sortContext.CompareFunctions[sortContext.NumberOfKeys] = CompareFunctions[column];
+        sortContext.SortOrders[sortContext.NumberOfKeys] = sortKeys.Keys[i].Order;
+        sortContext.NumberOfKeys++;
+    }
+
+    if (sortContext.NumberOfKeys == 0)
+        return FALSE;
+
+    qsort_s(Nodes, NumberOfNodes, sizeof(PVOID), PhTnpMultiSortCompare, &sortContext);
+
+    return TRUE;
+}
+
 /**
  * Sends a message to a TreeNew window, handling custom messages if needed.
  *

@@ -82,22 +82,30 @@ INT_PTR CALLBACK PhpPluginsDisabledDlgProc(
 #pragma region Plugin TreeList
 
 #define SORT_FUNCTION(Column) PluginsTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PluginsTreeNewCompare##Column( \
-    _In_ void *_context, \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PluginsTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPH_PLUGIN_TREE_ROOT_NODE node1 = *(PPH_PLUGIN_TREE_ROOT_NODE*)_elem1; \
-    PPH_PLUGIN_TREE_ROOT_NODE node2 = *(PPH_PLUGIN_TREE_ROOT_NODE*)_elem2; \
-    int sortResult = 0;
+    PPH_PLUGIN_TREE_ROOT_NODE node1 = (PPH_PLUGIN_TREE_ROOT_NODE)_node1; \
+    PPH_PLUGIN_TREE_ROOT_NODE node2 = (PPH_PLUGIN_TREE_ROOT_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uintptrcmp((ULONG_PTR)node1->Node.Index, (ULONG_PTR)node2->Node.Index); \
-    \
-    return PhModifySort(sortResult, ((PPH_PLUGMAN_CONTEXT)_context)->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uintptrcmp((ULONG_PTR)node1->Node.Index, (ULONG_PTR)node2->Node.Index);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Name)
 {
@@ -281,25 +289,16 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Name),
                     //SORT_FUNCTION(Author),
                     SORT_FUNCTION(Version)
                 };
-                _CoreCrtSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PH_PLUGIN_TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (context->TreeNewSortColumn < PH_PLUGIN_TREE_COLUMN_ITEM_MAXIMUM)
-                    sortFunction = sortFunctions[context->TreeNewSortColumn];
-                else
-                    sortFunction = NULL;
-
-                if (sortFunction)
-                {
-                    qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                }
+                PhTreeNewSortNodes(WindowHandle, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)context->NodeList->Items;
                 getChildren->NumberOfChildren = context->NodeList->Count;

@@ -1977,19 +1977,25 @@ static VOID PhpUpdateProcessNodeShortUsername(
 }
 
 #define SORT_FUNCTION(Column) PhpProcessTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpProcessTreeNewCompare##Column( \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpProcessTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPH_PROCESS_NODE node1 = *(PPH_PROCESS_NODE *)_elem1; \
-    PPH_PROCESS_NODE node2 = *(PPH_PROCESS_NODE *)_elem2; \
+    PPH_PROCESS_NODE node1 = (PPH_PROCESS_NODE)_node1; \
+    PPH_PROCESS_NODE node2 = (PPH_PROCESS_NODE)_node2; \
     PPH_PROCESS_ITEM processItem1 = node1->ProcessItem; \
     PPH_PROCESS_ITEM processItem2 = node2->ProcessItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhCmSortNodes (see the post-sort function).
 #define END_SORT_FUNCTION \
-    return PhpProcessTreeNewPostSortFunction(sortResult, node1, node2, ProcessTreeListSortOrder); \
+    return sortResult; \
 }
 
 _Function_class_(PH_CM_POST_SORT_FUNCTION)
@@ -2023,7 +2029,7 @@ BEGIN_SORT_FUNCTION(Name)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->ProcessName,
         processItem2->ProcessName,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2085,7 +2091,7 @@ BEGIN_SORT_FUNCTION(UserName)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->UserName,
         processItem2->UserName,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2096,7 +2102,7 @@ BEGIN_SORT_FUNCTION(Description)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->VersionInfo.FileDescription,
         processItem2->VersionInfo.FileDescription,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2107,7 +2113,7 @@ BEGIN_SORT_FUNCTION(CompanyName)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->VersionInfo.CompanyName,
         processItem2->VersionInfo.CompanyName,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2118,7 +2124,7 @@ BEGIN_SORT_FUNCTION(Version)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->VersionInfo.FileVersion,
         processItem2->VersionInfo.FileVersion,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2129,7 +2135,7 @@ BEGIN_SORT_FUNCTION(FileName)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->FileName,
         processItem2->FileName,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2140,7 +2146,7 @@ BEGIN_SORT_FUNCTION(CommandLine)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->CommandLine,
         processItem2->CommandLine,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2378,7 +2384,7 @@ BEGIN_SORT_FUNCTION(VerifiedSigner)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->VerifySignerName,
         processItem2->VerifySignerName,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2423,7 +2429,7 @@ BEGIN_SORT_FUNCTION(WindowTitle)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->WindowText,
         node2->WindowText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2727,20 +2733,22 @@ BEGIN_SORT_FUNCTION(PrivateBytesDelta)
     if (value1 != 0 && value2 != 0)
     {
         if (value1 > value2)
-            return -1;
+            sortResult = -1;
         else if (value1 < value2)
-            return 1;
-
-        return 0;
+            sortResult = 1;
     }
     else if (value1 == 0)
     {
-        return value2 == 0 ? 0 : (ProcessTreeListSortOrder == AscendingSortOrder ? -1 : 1);
+        sortResult = value2 == 0 ? 0 : (sortOrder == AscendingSortOrder ? -1 : 1);
     }
     else
     {
-        return (ProcessTreeListSortOrder == AscendingSortOrder ? 1 : -1);
+        sortResult = (sortOrder == AscendingSortOrder ? 1 : -1);
     }
+
+    // These results are already in display order. PhCmSortNodes applies the
+    // sort order again, which cancels this out.
+    sortResult = PhModifySort(sortResult, sortOrder);
 }
 END_SORT_FUNCTION
 
@@ -2757,7 +2765,7 @@ BEGIN_SORT_FUNCTION(PackageName)
     sortResult = PhCompareStringWithNullSortOrder(
         processItem1->PackageFullName,
         processItem2->PackageFullName,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2770,7 +2778,7 @@ BEGIN_SORT_FUNCTION(AppId)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->AppIdText,
         node2->AppIdText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2863,7 +2871,7 @@ BEGIN_SORT_FUNCTION(DesktopInfo)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->DesktopInfoText,
         node2->DesktopInfoText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -2943,7 +2951,7 @@ BEGIN_SORT_FUNCTION(ErrorMode)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->ErrorModeText,
         node2->ErrorModeText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -3026,7 +3034,7 @@ BEGIN_SORT_FUNCTION(GrantedAccess)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->GrantedAccessText,
         node2->GrantedAccessText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -3069,7 +3077,7 @@ BEGIN_SORT_FUNCTION(MitigationPolicies)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->MitigationPoliciesText,
         node2->MitigationPoliciesText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -3082,7 +3090,7 @@ BEGIN_SORT_FUNCTION(Services)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->ServicesText,
         node2->ServicesText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -3095,7 +3103,7 @@ BEGIN_SORT_FUNCTION(ShortUserName)
     sortResult = PhCompareStringWithNullSortOrder(
         node1->ShortUsernameText,
         node2->ShortUsernameText,
-        ProcessTreeListSortOrder,
+        sortOrder,
         TRUE
     );
 }
@@ -3179,7 +3187,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
 
             if (sortList)
             {
-                static CONST _CoreCrtNonSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_CM_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Name),
                     SORT_FUNCTION(Pid),
@@ -3291,27 +3299,29 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                     SORT_FUNCTION(ShortUserName),
                     SORT_FUNCTION(IoTotalBytes),
                 };
-                _CoreCrtNonSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PHPRTLC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (!PhCmForwardSort(
-                    (PPH_TREENEW_NODE *)sortList->Items,
-                    sortList->Count,
-                    sortColumn,
-                    sortOrder,
-                    &ProcessTreeListCm
-                    ))
-                {
-                    if (sortColumn < PHPRTLC_MAXIMUM)
-                        sortFunction = sortFunctions[sortColumn];
-                    else
-                        sortFunction = NULL;
+                if (!ProcessTreeListCm.SortFunctions)
+                    PhCmRegisterSortFunctions(&ProcessTreeListCm, sortFunctions, RTL_NUMBER_OF(sortFunctions), NULL);
 
-                    if (sortFunction)
-                    {
-                        qsort(sortList->Items, sortList->Count, sizeof(PVOID), sortFunction);
-                    }
+                if (sortColumn == ProcessTreeListSortColumn && sortOrder == ProcessTreeListSortOrder && sortOrder != NoSortOrder)
+                {
+                    // Sort by all of the control's sort keys.
+                    PhCmSortNodes(&ProcessTreeListCm, (PPH_TREENEW_NODE *)sortList->Items, sortList->Count);
+                }
+                else
+                {
+                    PH_TREENEW_SORT_KEYS sortKeys;
+
+                    // A single key chosen above (child processes by PID, or root
+                    // processes while the list is unsorted), in ascending order.
+                    memset(&sortKeys, 0, sizeof(PH_TREENEW_SORT_KEYS));
+                    sortKeys.Count = 1;
+                    sortKeys.Keys[0].Column = sortColumn;
+                    sortKeys.Keys[0].Order = sortOrder != NoSortOrder ? sortOrder : AscendingSortOrder;
+
+                    PhCmSortNodesEx(&ProcessTreeListCm, (PPH_TREENEW_NODE *)sortList->Items, sortList->Count, &sortKeys);
                 }
             }
         }

@@ -554,22 +554,25 @@ static VOID PhpUpdateServiceNodeKey(
 }
 
 #define SORT_FUNCTION(Column) PhpServiceTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpServiceTreeNewCompare##Column( \
-    _In_ const void *_elem1, \
-    _In_ const void *_elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpServiceTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
-    PPH_SERVICE_NODE node1 = *(PPH_SERVICE_NODE *)_elem1; \
-    PPH_SERVICE_NODE node2 = *(PPH_SERVICE_NODE *)_elem2; \
+    PPH_SERVICE_NODE node1 = (PPH_SERVICE_NODE)_node1; \
+    PPH_SERVICE_NODE node2 = (PPH_SERVICE_NODE)_node2; \
     PPH_SERVICE_ITEM serviceItem1 = node1->ServiceItem; \
     PPH_SERVICE_ITEM serviceItem2 = node2->ServiceItem; \
-    int sortResult = 0;
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder); \
+    UNREFERENCED_PARAMETER(_context);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhCmSortNodes (see the post-sort function).
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = PhCompareString(serviceItem1->Name, serviceItem2->Name, TRUE); \
-    \
-    return PhModifySort(sortResult, ServiceTreeListSortOrder); \
+    return sortResult; \
 }
 
 /**
@@ -645,7 +648,7 @@ BEGIN_SORT_FUNCTION(BinaryPath)
 {
     PhpUpdateServiceNodeConfig(node1);
     PhpUpdateServiceNodeConfig(node2);
-    sortResult = PhCompareStringWithNullSortOrder(node1->BinaryPath, node2->BinaryPath, ServiceTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->BinaryPath, node2->BinaryPath, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -659,7 +662,7 @@ BEGIN_SORT_FUNCTION(Group)
 {
     PhpUpdateServiceNodeConfig(node1);
     PhpUpdateServiceNodeConfig(node2);
-    sortResult = PhCompareStringWithNullSortOrder(node1->LoadOrderGroup, node2->LoadOrderGroup, ServiceTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->LoadOrderGroup, node2->LoadOrderGroup, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -667,7 +670,7 @@ BEGIN_SORT_FUNCTION(Description)
 {
     PhpUpdateServiceNodeDescription(node1);
     PhpUpdateServiceNodeDescription(node2);
-    sortResult = PhCompareStringWithNullSortOrder(node1->Description, node2->Description, ServiceTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->Description, node2->Description, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -690,7 +693,7 @@ BEGIN_SORT_FUNCTION(VerifiedSigner)
     sortResult = PhCompareStringWithNullSortOrder(
         serviceItem1->VerifySignerName,
         serviceItem2->VerifySignerName,
-        ServiceTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -701,7 +704,7 @@ BEGIN_SORT_FUNCTION(FileName)
     sortResult = PhCompareStringWithNullSortOrder(
         serviceItem1->FileName,
         serviceItem2->FileName,
-        ServiceTreeListSortOrder,
+        sortOrder,
         TRUE
         );
 }
@@ -717,7 +720,7 @@ BEGIN_SORT_FUNCTION(UserName)
 {
     PhpUpdateServiceNodeConfig(node1);
     PhpUpdateServiceNodeConfig(node2);
-    sortResult = PhCompareStringWithNullSortOrder(node1->UserName, node2->UserName, ServiceTreeListSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->UserName, node2->UserName, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -1038,7 +1041,7 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
 
             if (!getChildren->Node)
             {
-                static CONST _CoreCrtNonSecureSearchSortCompareFunction sortFunctions[] =
+                static CONST PPH_CM_COMPARE_FUNCTION sortFunctions[] =
                 {
                     SORT_FUNCTION(Name),
                     SORT_FUNCTION(Pid),
@@ -1058,28 +1061,13 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
                     SORT_FUNCTION(ExitCode),
                     SORT_FUNCTION(UserName),
                 };
-                _CoreCrtNonSecureSearchSortCompareFunction sortFunction;
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PHSVTLC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                if (!PhCmForwardSort(
-                    (PPH_TREENEW_NODE *)ServiceNodeList->Items,
-                    ServiceNodeList->Count,
-                    ServiceTreeListSortColumn,
-                    ServiceTreeListSortOrder,
-                    &ServiceTreeListCm
-                    ))
-                {
-                    if (ServiceTreeListSortColumn < PHSVTLC_MAXIMUM)
-                        sortFunction = sortFunctions[ServiceTreeListSortColumn];
-                    else
-                        sortFunction = NULL;
+                if (!ServiceTreeListCm.SortFunctions)
+                    PhCmRegisterSortFunctions(&ServiceTreeListCm, sortFunctions, RTL_NUMBER_OF(sortFunctions), NULL);
 
-                    if (sortFunction)
-                    {
-                        qsort(ServiceNodeList->Items, ServiceNodeList->Count, sizeof(PVOID), sortFunction);
-                    }
-                }
+                PhCmSortNodes(&ServiceTreeListCm, (PPH_TREENEW_NODE *)ServiceNodeList->Items, ServiceNodeList->Count);
 
                 getChildren->Children = (PPH_TREENEW_NODE *)ServiceNodeList->Items;
                 getChildren->NumberOfChildren = ServiceNodeList->Count;

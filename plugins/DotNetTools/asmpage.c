@@ -781,23 +781,30 @@ VOID DotNetAsmShowContextMenu(
 }
 
 #define SORT_FUNCTION(Column) DotNetAsmTreeNewCompare##Column
-#define BEGIN_SORT_FUNCTION(Column) static int __cdecl DotNetAsmTreeNewCompare##Column( \
-    _In_ void* _context, \
-    _In_ void const* _elem1, \
-    _In_ void const* _elem2 \
+#define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI DotNetAsmTreeNewCompare##Column( \
+    _In_ PVOID _node1, \
+    _In_ PVOID _node2, \
+    _In_ PH_SORT_ORDER sortOrder, \
+    _In_opt_ PVOID _context \
     ) \
 { \
     PASMPAGE_CONTEXT context = _context; \
-    PDNA_NODE node1 = *(PDNA_NODE *)_elem1; \
-    PDNA_NODE node2 = *(PDNA_NODE *)_elem2; \
-    int sortResult = 0;
+    PDNA_NODE node1 = (PDNA_NODE)_node1; \
+    PDNA_NODE node2 = (PDNA_NODE)_node2; \
+    LONG sortResult = 0; \
+    UNREFERENCED_PARAMETER(sortOrder);
 
+// Returns the raw ascending comparison. The sort order of each key and the
+// tie-breaker are applied by PhTreeNewSortNodes.
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
-        sortResult = uint64cmp(node1->Node.Index, node2->Node.Index); \
-    \
-    return PhModifySort(sortResult, context->TreeNewSortOrder); \
+    return sortResult; \
 }
+
+BEGIN_SORT_FUNCTION(TieBreak)
+{
+    sortResult = uint64cmp(node1->Node.Index, node2->Node.Index);
+}
+END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Structure)
 {
@@ -813,31 +820,31 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Flags)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->FlagsText, node2->FlagsText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->FlagsText, node2->FlagsText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Path)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->PathText, node2->PathText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->PathText, node2->PathText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(NativePath)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->NativePathText,  node2->NativePathText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->NativePathText,  node2->NativePathText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(BaseAddress)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->BaseAddressText, node2->BaseAddressText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->BaseAddressText, node2->BaseAddressText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Mvid)
 {
-    sortResult = PhCompareStringWithNullSortOrder(node1->MvidText, node2->MvidText, context->TreeNewSortOrder, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->MvidText, node2->MvidText, sortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -893,7 +900,7 @@ BOOLEAN NTAPI DotNetAsmTreeNewCallback(
             {
                 if (!node)
                 {
-                    static PVOID sortFunctions[] =
+                    static CONST PPH_TREENEW_COMPARE_FUNCTION sortFunctions[] =
                     {
                         SORT_FUNCTION(Structure),
                         SORT_FUNCTION(Address),
@@ -903,19 +910,10 @@ BOOLEAN NTAPI DotNetAsmTreeNewCallback(
                         SORT_FUNCTION(BaseAddress),
                         SORT_FUNCTION(Mvid),
                     };
-                    int (__cdecl* sortFunction)(void*, void const*, void const*);
 
                     static_assert(RTL_NUMBER_OF(sortFunctions) == DNATNC_MAXIMUM, "SortFunctions must equal maximum.");
 
-                    if (context->TreeNewSortColumn < DNATNC_MAXIMUM)
-                        sortFunction = sortFunctions[context->TreeNewSortColumn];
-                    else
-                        sortFunction = NULL;
-
-                    if (sortFunction)
-                    {
-                        qsort_s(context->NodeList->Items, context->NodeList->Count, sizeof(PVOID), sortFunction, context);
-                    }
+                    PhTreeNewSortNodes(hwnd, context->NodeList->Items, context->NodeList->Count, sortFunctions, RTL_NUMBER_OF(sortFunctions), SORT_FUNCTION(TieBreak), context);
 
                     getChildren->Children = (PPH_TREENEW_NODE*)context->NodeList->Items;
                     getChildren->NumberOfChildren = context->NodeList->Count;
