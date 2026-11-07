@@ -27,7 +27,8 @@ typedef struct _DEVICE_NODE
 typedef struct _DEVICE_TREE
 {
     PPH_DEVICE_TREE Tree;
-    PPH_LIST Nodes;
+    PPH_LIST Nodes; // Sorted by InstanceIdHash for DeviceTreeLookupNode. Do not reorder.
+    PPH_LIST DisplayNodes; // The same nodes, in display order for the flat view.
     PPH_LIST Roots;
 } DEVICE_TREE, *PDEVICE_TREE;
 
@@ -296,6 +297,10 @@ PDEVICE_TREE DeviceTreeCreate(
 
     qsort(tree->Nodes->Items, tree->Nodes->Count, sizeof(PVOID), DeviceNodeSortFunction);
 
+    // The flat view sorts its own copy so the lookup index stays in hash order.
+    tree->DisplayNodes = PhCreateList(tree->Nodes->Count);
+    PhAddItemsList(tree->DisplayNodes, tree->Nodes->Items, tree->Nodes->Count);
+
     tree->Tree = PhReferenceObject(Tree);
 
     PhTrace("Created device tree with %lu nodes", tree->Nodes->Count);
@@ -319,6 +324,7 @@ VOID DeviceTreeDeleteProcedure(
     }
 
     PhDereferenceObject(tree->Nodes);
+    PhDereferenceObject(tree->DisplayNodes);
     PhDereferenceObject(tree->Roots);
     PhDereferenceObject(tree->Tree);
 }
@@ -811,9 +817,9 @@ BOOLEAN NTAPI DeviceTreeCallback(
                     }
                     else
                     {
-                        getChildren->Children = (PPH_TREENEW_NODE*)DeviceTree->Nodes->Items;
-                        getChildren->NumberOfChildren = DeviceTree->Nodes->Count;
-                        sortList = DeviceTree->Nodes;
+                        getChildren->Children = (PPH_TREENEW_NODE*)DeviceTree->DisplayNodes->Items;
+                        getChildren->NumberOfChildren = DeviceTree->DisplayNodes->Count;
+                        sortList = DeviceTree->DisplayNodes;
                     }
                 }
 
