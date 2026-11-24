@@ -256,7 +256,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_GPU,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPU],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPU],
         NULL,
         L"&GPU history",
         EtGpuEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -268,7 +268,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_NPU,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_NPU],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_NPU],
         NULL,
         L"&NPU history",
         EtNpuEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -280,7 +280,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_DISK,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_DISK],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_DISK],
         NULL,
         L"&Disk history",
         EtEtwEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -292,7 +292,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_NETWORK,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_NETWORK],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_NETWORK],
         NULL,
         L"&Network history",
         EtEtwEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -304,7 +304,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_GPUTEXT,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUTEXT],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUTEXT],
         NULL,
         L"&GPU usage (text)",
         EtGpuEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -316,7 +316,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_DISKTEXT,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_DISKTEXT],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_DISKTEXT],
         NULL,
         L"&Disk usage (text)",
         EtEtwEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -328,7 +328,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_NETWORKTEXT,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_NETWORKTEXT],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_NETWORKTEXT],
         NULL,
         L"&Network usage (text)",
         EtEtwEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -340,7 +340,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_GPUMEM,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUMEM],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUMEM],
         NULL,
         L"&GPU memory history",
         EtGpuEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -352,7 +352,7 @@ VOID EtRegisterNotifyIcons(
     Pointers->RegisterTrayIcon(
         PluginInstance,
         ETP_TRAY_ICON_ID_GPUMEMTEXT,
-        EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUMEMTEXT],
+        &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUMEMTEXT],
         NULL,
         L"&GPU memory usage (text)",
         EtGpuEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -366,7 +366,7 @@ VOID EtRegisterNotifyIcons(
         Pointers->RegisterTrayIcon(
             PluginInstance,
             ETP_TRAY_ICON_ID_GPUTEMP,
-            EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUTEMP],
+            &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUTEMP],
             NULL,
             L"&GPU temperature history",
             EtGpuEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -378,7 +378,7 @@ VOID EtRegisterNotifyIcons(
         Pointers->RegisterTrayIcon(
             PluginInstance,
             ETP_TRAY_ICON_ID_GPUTEMPTEXT,
-            EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUTEMPTEXT],
+            &EtpTrayIconGuids[ETP_TRAY_ICON_GUID_GPUTEMPTEXT],
             NULL,
             L"&GPU temperature (text)",
             EtGpuEnabled ? 0 : PH_NF_ICON_UNAVAILABLE,
@@ -395,6 +395,7 @@ VOID EtpGpuIconUpdateCallback(
     _In_opt_ PVOID Context
     )
 {
+    BOOLEAN transparent;
     static PH_GRAPH_DRAW_INFO drawInfo =
     {
         16,
@@ -442,11 +443,10 @@ VOID EtpGpuIconUpdateCallback(
 
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
-    drawInfo.LineColor1 = PhGetIntegerSetting(SETTING_COLOR_CPU_KERNEL);
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(drawInfo.LineColor1);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhGetIntegerSetting(SETTING_COLOR_CPU_KERNEL), 0, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (EtTrayIconTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -536,6 +536,7 @@ VOID EtpNpuIconUpdateCallback(
     _In_opt_ PVOID Context
     )
 {
+    BOOLEAN transparent;
     static PH_GRAPH_DRAW_INFO drawInfo =
     {
         16,
@@ -583,11 +584,10 @@ VOID EtpNpuIconUpdateCallback(
 
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
-    drawInfo.LineColor1 = PhGetIntegerSetting(SETTING_COLOR_CPU_KERNEL);
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(drawInfo.LineColor1);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhGetIntegerSetting(SETTING_COLOR_CPU_KERNEL), 0, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (EtTrayIconTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -656,6 +656,7 @@ VOID EtpDiskIconUpdateCallback(
     _In_opt_ PVOID Context
     )
 {
+    BOOLEAN transparent;
     static PH_GRAPH_DRAW_INFO drawInfo =
     {
         16,
@@ -720,13 +721,10 @@ VOID EtpDiskIconUpdateCallback(
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
     drawInfo.LineData2 = lineData2;
-    drawInfo.LineColor1 = PhGetIntegerSetting(SETTING_COLOR_IO_READ_OTHER);
-    drawInfo.LineColor2 = PhGetIntegerSetting(SETTING_COLOR_IO_WRITE);
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(drawInfo.LineColor1);
-    drawInfo.LineBackColor2 = PhHalveColorBrightness(drawInfo.LineColor2);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhGetIntegerSetting(SETTING_COLOR_IO_READ_OTHER), PhGetIntegerSetting(SETTING_COLOR_IO_WRITE), PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (EtTrayIconTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -794,6 +792,7 @@ VOID EtpNetworkIconUpdateCallback(
     _In_opt_ PVOID Context
     )
 {
+    BOOLEAN transparent;
     static PH_GRAPH_DRAW_INFO drawInfo =
     {
         16,
@@ -875,13 +874,10 @@ VOID EtpNetworkIconUpdateCallback(
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
     drawInfo.LineData2 = lineData2;
-    drawInfo.LineColor1 = PhGetIntegerSetting(SETTING_COLOR_IO_READ_OTHER);
-    drawInfo.LineColor2 = PhGetIntegerSetting(SETTING_COLOR_IO_WRITE);
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(drawInfo.LineColor1);
-    drawInfo.LineBackColor2 = PhHalveColorBrightness(drawInfo.LineColor2);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhGetIntegerSetting(SETTING_COLOR_IO_READ_OTHER), PhGetIntegerSetting(SETTING_COLOR_IO_WRITE), PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (EtTrayIconTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -1203,6 +1199,7 @@ VOID EtpGpuMemoryIconUpdateCallback(
     _In_opt_ PVOID Context
     )
 {
+    BOOLEAN transparent;
     static PH_GRAPH_DRAW_INFO drawInfo =
     {
         16,
@@ -1249,11 +1246,10 @@ VOID EtpGpuMemoryIconUpdateCallback(
 
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
-    drawInfo.LineColor1 = PhGetIntegerSetting(SETTING_COLOR_PRIVATE);
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(drawInfo.LineColor1);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhGetIntegerSetting(SETTING_COLOR_PRIVATE), 0, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (EtTrayIconTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -1341,6 +1337,7 @@ VOID EtpGpuTemperatureIconUpdateCallback(
     _In_opt_ PVOID Context
     )
 {
+    BOOLEAN transparent;
     static PH_GRAPH_DRAW_INFO drawInfo =
     {
         16,
@@ -1387,11 +1384,10 @@ VOID EtpGpuTemperatureIconUpdateCallback(
 
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
-    drawInfo.LineColor1 = PhGetIntegerSetting(SETTING_COLOR_TEMPERATURE);
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(drawInfo.LineColor1);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhGetIntegerSetting(SETTING_COLOR_TEMPERATURE), 0, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (EtTrayIconTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }

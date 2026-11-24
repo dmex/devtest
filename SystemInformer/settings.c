@@ -12,9 +12,11 @@
  */
 
 #include <phapp.h>
+#include <sysinfo.h>
 #include <settings.h>
 #define PH_SETTINGS_PRIVATE
 #include <phsettings.h>
+#include <graphstyles.h>
 
 VOID PhAddDefaultSettings(
     VOID
@@ -102,6 +104,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(SETTING_SEARCH_THREADS_REGEX, L"0");
     PhpAddIntegerSetting(SETTING_SEARCH_THREADS_CASE_SENSITIVE, L"0");
     PhpAddIntegerSetting(SETTING_SEARCH_THREAD_STACKS_REGEX, L"0");
+    PhpAddIntegerSetting(SETTING_SEARCH_THREAD_STACKS_CASE_SENSITIVE, L"0");
     PhpAddIntegerSetting(SETTING_SEARCH_CONTROL_REGEX, L"0");
     PhpAddIntegerSetting(SETTING_SEARCH_CONTROL_CASE_SENSITIVE, L"0");
     PhpAddIntegerSetting(SETTING_SEARCH_COLUMNS_REGEX, L"0");
@@ -494,6 +497,9 @@ VOID PhAddDefaultSettings(
 
     PhpAddIntegerSetting(SETTING_GRAPH_SHOW_TEXT, L"1");
     PhpAddIntegerSetting(SETTING_GRAPH_COLOR_MODE, L"0");
+    PhpAddStringSetting(SETTING_GRAPH_STYLES, L"");
+    PhpAddStringSetting(SETTING_GRAPH_STYLE_LIGHT, L"");
+    PhpAddStringSetting(SETTING_GRAPH_STYLE_DARK, L"");
     PhpAddIntegerSetting(SETTING_COLOR_CPU_KERNEL, L"00ff00");
     PhpAddIntegerSetting(SETTING_COLOR_CPU_USER, L"0000ff");
     PhpAddIntegerSetting(SETTING_COLOR_IO_READ_OTHER, L"00ffff");
@@ -683,7 +689,6 @@ VOID PhUpdateCachedSettings(
     PH_GET_INTEGER_CACHED_SETTING(ColorUnknown);
 
     PH_GET_INTEGER_CACHED_SETTING(GraphShowText);
-    PH_GET_INTEGER_CACHED_SETTING(GraphColorMode);
     PH_GET_INTEGER_CACHED_SETTING(ColorCpuKernel);
     PH_GET_INTEGER_CACHED_SETTING(ColorCpuUser);
     PH_GET_INTEGER_CACHED_SETTING(ColorIoReadOther);
@@ -694,6 +699,9 @@ VOID PhUpdateCachedSettings(
     PH_GET_INTEGER_CACHED_SETTING(ColorPowerUsage);
     PH_GET_INTEGER_CACHED_SETTING(ColorTemperature);
     PH_GET_INTEGER_CACHED_SETTING(ColorFanRpm);
+
+    // The active graph style overrides GraphShowText and the Color* caches.
+    PhGsInvalidateActiveStyle();
 
     PH_GET_INTEGER_CACHED_SETTING(ImageCoherencyScanLevel);
 

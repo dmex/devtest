@@ -77,6 +77,8 @@ if !errorlevel! neq 0 exit /b !errorlevel!
 call :SetupVcVars "%VCVARS_ARCH%"
 if !errorlevel! neq 0 exit /b !errorlevel!
 
+if /i "%TOOLCHAIN:~0,6%"=="clang-" call :UseVisualStudioClang
+
 if /i "%ACTION%"=="generate" (
     call :RunGenerate
     exit /b !errorlevel!
@@ -167,7 +169,7 @@ if /i "%TOOLCHAIN%"=="clang-msvc-arm64" (
     set "TOOLCHAIN_FILE=%CD%\cmake\toolchain\clang-msvc-arm64.cmake"
     exit /b 0
 )
-REM clang-lld-* are DEBUG-only. lld-link cannot emit XFG or EHCONT, so Release
+REM clang-lld-* are DEBUG-only. lld-link cannot emit EHCONT, so Release
 REM builds must use a clang-msvc-* or msvc-* toolchain. See cmake\toolchain\clang-lld.cmake.
 if /i "%TOOLCHAIN%"=="clang-lld-x86" (
     set "PLATFORM=Win32"
@@ -222,6 +224,21 @@ echo VCVARS:        %VCVARS_ARCH%
 echo Source:        %SOURCE_DIR%
 echo Build:         %BUILD_DIR%
 echo ===============================================
+exit /b 0
+
+REM -----------------------------------------------------------------------------
+REM Function: UseVisualStudioClang
+REM Description: Prefers the clang bundled with Visual Studio, which matches its STL.
+REM -----------------------------------------------------------------------------
+:UseVisualStudioClang
+set "VS_LLVM_BIN=%VSINSTALLPATH%\VC\Tools\Llvm\x64\bin"
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "VS_LLVM_BIN=%VSINSTALLPATH%\VC\Tools\Llvm\ARM64\bin"
+if not exist "%VS_LLVM_BIN%\clang-cl.exe" (
+    echo Warning: Visual Studio clang not found in "%VS_LLVM_BIN%", using clang-cl from PATH.
+    exit /b 0
+)
+set "PATH=%VS_LLVM_BIN%;%PATH%"
+echo Clang:         %VS_LLVM_BIN%
 exit /b 0
 
 REM -----------------------------------------------------------------------------

@@ -19,6 +19,7 @@
  */
 
 #include <phapp.h>
+#include <sysinfo.h>
 #include <proctree.h>
 
 #include <appresolver.h>
@@ -89,6 +90,8 @@ static LONG GraphContextHeight = 0;
 static HBITMAP GraphOldBitmap = NULL;
 static HBITMAP GraphBitmap = NULL;
 static PVOID GraphBits = NULL;
+static PH_GRAPH_SCROLL_STATE ProcessTreeGraphScroll;
+static UINT_PTR ProcessTreeGraphScrollTimerId = 0;
 
 /**
  * Initializes the process tree list.
@@ -235,6 +238,7 @@ VOID PhInitializeProcessTreeList(
     PhAddTreeNewColumn(hwnd, PHPRTLC_MITIGATION_POLICIES, FALSE, L"Mitigation policies", 180, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumn(hwnd, PHPRTLC_SERVICES, FALSE, L"Services", 180, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumn(hwnd, PHPRTLC_SHORT_USERNAME, FALSE, L"Short user name", 140, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(hwnd, PHPRTLC_CURRENTDIRECTORY, FALSE, L"Current directory", 180, PH_ALIGN_LEFT, ULONG_MAX, DT_PATH_ELLIPSIS);
 
     PhCmInitializeManager(&ProcessTreeListCm, hwnd, PHPRTLC_MAXIMUM, PhpProcessTreeNewPostSortFunction);
     PhInitializeTreeNewFilterSupport(&FilterSupport, hwnd, ProcessNodeList);
@@ -699,6 +703,7 @@ VOID PhpRemoveProcessNode(
     PhClearReference(&ProcessNode->MitigationPoliciesText);
     PhClearReference(&ProcessNode->ServicesText);
     PhClearReference(&ProcessNode->ShortUsernameText);
+    PhClearReference(&ProcessNode->CurrentDirectoryText);
 
     PhDeleteGraphBuffers(&ProcessNode->CpuGraphBuffers);
     PhDeleteGraphBuffers(&ProcessNode->PrivateGraphBuffers);
@@ -721,6 +726,73 @@ VOID PhUpdateProcessNode(
 
     PhInvalidateTreeNewNode(&ProcessNode->Node, TN_CACHE_COLOR | TN_CACHE_ICON);
     TreeNew_InvalidateNode(ProcessTreeListHandle, &ProcessNode->Node);
+}
+
+static VOID PhpInvalidateProcessTreeGraphs(
+    VOID
+    )
+{
+    PhInvalidateTreeNewColumn(ProcessTreeListHandle, PHPRTLC_CPUHISTORY);
+    PhInvalidateTreeNewColumn(ProcessTreeListHandle, PHPRTLC_PRIVATEBYTESHISTORY);
+    PhInvalidateTreeNewColumn(ProcessTreeListHandle, PHPRTLC_IOHISTORY);
+}
+
+static VOID CALLBACK PhpProcessTreeGraphScrollTimerProc(
+    _In_ HWND WindowHandle,
+    _In_ UINT Message,
+    _In_ UINT_PTR TimerId,
+    _In_ ULONG Time
+    )
+{
+    FLOAT offset;
+
+    // The last frame is drawn at offset 0.
+    if (!PhGetGraphScrollOffset(&ProcessTreeGraphScroll, 2, &offset))
+    {
+        KillTimer(NULL, ProcessTreeGraphScrollTimerId);
+        ProcessTreeGraphScrollTimerId = 0;
+    }
+
+    PhpInvalidateProcessTreeGraphs();
+}
+
+// Scrolls the history graphs until the next update.
+static VOID PhpStartProcessTreeGraphScroll(
+    VOID
+    )
+{
+    static const ULONG columnIds[] = { PHPRTLC_CPUHISTORY, PHPRTLC_PRIVATEBYTESHISTORY, PHPRTLC_IOHISTORY };
+    PH_TREENEW_COLUMN column;
+    HWND rootWindow;
+    BOOLEAN visible = FALSE;
+    ULONG interval = 0;
+
+    if (IsWindowVisible(ProcessTreeListHandle) && !((rootWindow = GetAncestor(ProcessTreeListHandle, GA_ROOT)) && IsIconic(rootWindow)))
+    {
+        for (ULONG i = 0; i < RTL_NUMBER_OF(columnIds); i++)
+        {
+            if (TreeNew_GetColumn(ProcessTreeListHandle, columnIds[i], &column) && column.Visible)
+            {
+                visible = TRUE;
+                break;
+            }
+        }
+    }
+
+    if (visible)
+        interval = PhStartGraphScroll(&ProcessTreeGraphScroll);
+    else
+        ProcessTreeGraphScroll.StartTime = 0;
+
+    if (interval)
+    {
+        ProcessTreeGraphScrollTimerId = SetTimer(NULL, ProcessTreeGraphScrollTimerId, interval, PhpProcessTreeGraphScrollTimerProc);
+    }
+    else if (ProcessTreeGraphScrollTimerId)
+    {
+        KillTimer(NULL, ProcessTreeGraphScrollTimerId);
+        ProcessTreeGraphScrollTimerId = 0;
+    }
 }
 
 VOID PhTickProcessNodes(
@@ -795,6 +867,9 @@ VOID PhTickProcessNodes(
         else
             InvalidateRect(ProcessTreeListHandle, NULL, FALSE);
     }
+
+    if (ProcessTreeListHandle)
+        PhpStartProcessTreeGraphScroll();
 }
 
 static VOID PhpNeedGraphContext(
@@ -1976,6 +2051,44 @@ static VOID PhpUpdateProcessNodeShortUsername(
     }
 }
 
+static VOID PhpUpdateProcessNodeCurrentDirectory(
+    _Inout_ PPH_PROCESS_NODE ProcessNode
+    )
+{
+    if (!FlagOn(ProcessNode->ValidMask, PHPN_CURRENTDIRECTORY))
+    {
+        HANDLE processHandle;
+
+        PhClearReference(&ProcessNode->CurrentDirectoryText);
+
+        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId) && !ProcessNode->ProcessItem->IsSubsystemProcess)
+        {
+            if (NT_SUCCESS(PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                ProcessNode->ProcessId
+                )))
+            {
+                PPH_STRING currentDirectory;
+
+                // Query the WOW64 current directory, because that's the one that actually gets updated. (prpggen.c)
+                if (NT_SUCCESS(PhGetProcessCurrentDirectory(
+                    processHandle,
+                    !!ProcessNode->ProcessItem->IsWow64Process,
+                    &currentDirectory
+                    )))
+                {
+                    ProcessNode->CurrentDirectoryText = currentDirectory;
+                }
+
+                NtClose(processHandle);
+            }
+        }
+
+        SetFlag(ProcessNode->ValidMask, PHPN_CURRENTDIRECTORY);
+    }
+}
+
 #define SORT_FUNCTION(Column) PhpProcessTreeNewCompare##Column
 #define BEGIN_SORT_FUNCTION(Column) static LONG NTAPI PhpProcessTreeNewCompare##Column( \
     _In_ PVOID _node1, \
@@ -3109,6 +3222,19 @@ BEGIN_SORT_FUNCTION(ShortUserName)
 }
 END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(CurrentDirectory)
+{
+    PhpUpdateProcessNodeCurrentDirectory(node1);
+    PhpUpdateProcessNodeCurrentDirectory(node2);
+    sortResult = PhCompareStringWithNullSortOrder(
+        node1->CurrentDirectoryText,
+        node2->CurrentDirectoryText,
+        ProcessTreeListSortOrder,
+        TRUE
+        );
+}
+END_SORT_FUNCTION
+
 BOOLEAN NTAPI PhpProcessTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
@@ -3298,6 +3424,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                     SORT_FUNCTION(Services),
                     SORT_FUNCTION(ShortUserName),
                     SORT_FUNCTION(IoTotalBytes),
+                    SORT_FUNCTION(CurrentDirectory),
                 };
 
                 static_assert(RTL_NUMBER_OF(sortFunctions) == PHPRTLC_MAXIMUM, "SortFunctions must equal maximum.");
@@ -4869,6 +4996,12 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                     }
                 }
                 break;
+            case PHPRTLC_CURRENTDIRECTORY:
+                {
+                    PhpUpdateProcessNodeCurrentDirectory(node);
+                    getCellText->Text = PhGetStringRef(node->CurrentDirectoryText);
+                }
+                break;
             default:
                 return FALSE;
             }
@@ -5015,6 +5148,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             PPH_PROCESS_ITEM processItem;
             RECT rect;
             PH_GRAPH_DRAW_INFO drawInfo;
+            BOOLEAN transparentBack = FALSE;
 
             node = (PPH_PROCESS_NODE)customDraw->Node;
             processItem = node->ProcessItem;
@@ -5030,10 +5164,9 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             case PHPRTLC_PRIVATEBYTESHISTORY:
             case PHPRTLC_IOHISTORY:
                 memset(&drawInfo, 0, sizeof(PH_GRAPH_DRAW_INFO));
-                drawInfo.Width = rect.right - rect.left - 1; // leave a small gap
-                drawInfo.Height = rect.bottom - rect.top - 1; // leave a small gap
                 drawInfo.Step = 2;
-                drawInfo.BackColor = RGB(0x00, 0x00, 0x00);
+                drawInfo.Width = rect.right - rect.left - 1 + drawInfo.Step; // leave a small gap; one more sample scrolls in from the left
+                drawInfo.Height = rect.bottom - rect.top - 1; // leave a small gap
                 break;
             }
 
@@ -5043,10 +5176,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             case PHPRTLC_CPUHISTORY:
                 {
                     drawInfo.Flags = PH_GRAPH_USE_LINE_2;
-                    drawInfo.LineColor1 = PhCsColorCpuKernel;
-                    drawInfo.LineColor2 = PhCsColorCpuUser;
-                    drawInfo.LineBackColor1 = PhHalveColorBrightness(PhCsColorCpuKernel);
-                    drawInfo.LineBackColor2 = PhHalveColorBrightness(PhCsColorCpuUser);
+                    transparentBack = PhSiSetGraphStyleColors(&drawInfo, PhCsColorCpuKernel, PhCsColorCpuUser, PhGraphSurfaceCell);
 
                     PhGetDrawInfoGraphBuffers(
                         &node->CpuGraphBuffers,
@@ -5104,8 +5234,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             case PHPRTLC_PRIVATEBYTESHISTORY:
                 {
                     drawInfo.Flags = 0;
-                    drawInfo.LineColor1 = PhCsColorPrivate;
-                    drawInfo.LineBackColor1 = PhHalveColorBrightness(PhCsColorPrivate);
+                    transparentBack = PhSiSetGraphStyleColors(&drawInfo, PhCsColorPrivate, 0, PhGraphSurfaceCell);
 
                     PhGetDrawInfoGraphBuffers(
                         &node->PrivateGraphBuffers,
@@ -5161,10 +5290,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             case PHPRTLC_IOHISTORY:
                 {
                     drawInfo.Flags = PH_GRAPH_USE_LINE_2;
-                    drawInfo.LineColor1 = PhCsColorIoReadOther;
-                    drawInfo.LineColor2 = PhCsColorIoWrite;
-                    drawInfo.LineBackColor1 = PhHalveColorBrightness(PhCsColorIoReadOther);
-                    drawInfo.LineBackColor2 = PhHalveColorBrightness(PhCsColorIoWrite);
+                    transparentBack = PhSiSetGraphStyleColors(&drawInfo, PhCsColorIoReadOther, PhCsColorIoWrite, PhGraphSurfaceCell);
 
                     PhGetDrawInfoGraphBuffers(
                         &node->IoGraphBuffers,
@@ -5227,11 +5353,29 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             case PHPRTLC_CPUHISTORY:
             case PHPRTLC_PRIVATEBYTESHISTORY:
             case PHPRTLC_IOHISTORY:
+                drawInfo.Width -= drawInfo.Step;
                 PhpNeedGraphContext(customDraw->Dc, drawInfo.Width, drawInfo.Height);
+
+                // A transparent background draws on the row color the tree already painted.
+                if (transparentBack)
+                {
+                    COLORREF rowColor = GetPixel(customDraw->Dc, rect.left, rect.top + 1);
+
+                    if (rowColor == CLR_INVALID)
+                        rowColor = PhEnableThemeSupport ? PhThemeWindowBackgroundColor : GetSysColor(COLOR_WINDOW);
+
+                    drawInfo.BackColor = rowColor;
+                    drawInfo.LineBackColor1 = PhGsDeriveFillColor(drawInfo.LineColor1, rowColor, FALSE);
+                    drawInfo.LineBackColor2 = PhGsDeriveFillColor(drawInfo.LineColor2, rowColor, FALSE);
+                }
 
                 if (GraphBits)
                 {
-                    PhDrawGraphDirect(GraphContext, GraphBits, &drawInfo);
+                    FLOAT offset;
+
+                    PhGetGraphScrollOffset(&ProcessTreeGraphScroll, drawInfo.Step, &offset);
+                    PhDrawGraphDirectEx(GraphContext, GraphBits, &drawInfo, offset);
+
                     BitBlt(
                         customDraw->Dc,
                         rect.left,

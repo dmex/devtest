@@ -150,7 +150,7 @@ VOID PhSearchControlInitializeColors(
     static const COLORREF FrameHotClassicColor = RGB(43, 43, 43);
     static const COLORREF CueBannerTextThemeColor = RGB(170, 170, 170);
 
-    Context->DcBrush = PhGetStockBrush(DC_BRUSH);
+    Context->DcBrush = PhStockDcBrush;
     Context->WindowBrush = GetSysColorBrush(COLOR_WINDOW);
 
     Context->WindowBorderOuterColor = PhThemeWindowBackground2Color;
@@ -786,7 +786,7 @@ BOOLEAN PhSearchUpdateText(
 
     PhDereferenceObject(searchboxTextString);
 
-    //PhSearchUpdateRegex(WindowHandle, Context);
+    PhpSearchUpdateRegex(WindowHandle, Context);
 
     if (!Context->Callback)
         return TRUE;
@@ -1235,7 +1235,7 @@ LRESULT CALLBACK PhSearchWndSubclassProc(
             {
                 context->CaseButton.Active = !context->CaseButton.Active;
                 PhSetIntegerSetting(context->CaseSetting, context->CaseButton.Active);
-                PhSearchUpdateText(WindowHandle, context, FALSE);
+                PhSearchUpdateText(WindowHandle, context, TRUE);
             }
 
             PhSearchControlButtonRect(context, &context->FuzzyButton, &windowRect, &buttonRect);
@@ -1330,7 +1330,7 @@ LRESULT CALLBACK PhSearchWndSubclassProc(
                         {
                             PPH_STRING selectedText = PH_AUTO(PhSubstring(text, selStart, selEnd - selStart));
                             PPH_STRING startText = PH_AUTO(PhSubstring(text, 0, selStart));
-                            PPH_STRING endText = PH_AUTO(PhSubstring(text, selEnd, text->Length / sizeof(WCHAR)));
+                            PPH_STRING endText = PH_AUTO(PhSubstring(text, selEnd, text->Length / sizeof(WCHAR) - selEnd));
                             PPH_STRING newText = PH_AUTO(PhConcatStringRef2(&startText->sr, &endText->sr));
                             PhSetClipboardString(WindowHandle, &selectedText->sr);
                             PhSetWindowText(WindowHandle, newText->Buffer);
@@ -1347,7 +1347,7 @@ LRESULT CALLBACK PhSearchWndSubclassProc(
                         {
                             PPH_STRING clipText = PH_AUTO(PhGetClipboardString(WindowHandle));
                             PPH_STRING startText = PH_AUTO(PhSubstring(text, 0, selStart));
-                            PPH_STRING endText = PH_AUTO(PhSubstring(text, selEnd, text->Length / sizeof(WCHAR)));
+                            PPH_STRING endText = PH_AUTO(PhSubstring(text, selEnd, text->Length / sizeof(WCHAR) - selEnd));
                             PPH_STRING newText = PH_AUTO(PhConcatStringRef3(&startText->sr, &clipText->sr, &endText->sr));
                             PhSetWindowText(WindowHandle, newText->Buffer);
                             PhSearchUpdateText(WindowHandle, context, FALSE);
@@ -1356,7 +1356,7 @@ LRESULT CALLBACK PhSearchWndSubclassProc(
                     case 5:
                         {
                             PPH_STRING startText = PH_AUTO(PhSubstring(text, 0, selStart));
-                            PPH_STRING endText = PH_AUTO(PhSubstring(text, selEnd, text->Length / sizeof(WCHAR)));
+                            PPH_STRING endText = PH_AUTO(PhSubstring(text, selEnd, text->Length / sizeof(WCHAR) - selEnd));
                             PPH_STRING newText = PH_AUTO(PhConcatStringRef2(&startText->sr, &endText->sr));
                             PhSetWindowText(WindowHandle, newText->Buffer);
                             PhSearchUpdateText(WindowHandle, context, FALSE);
@@ -1525,6 +1525,15 @@ LRESULT CALLBACK PhSearchWndSubclassProc(
                 break;
             if (!PhGetWindowRect(WindowHandle, &windowRect))
                 break;
+
+            // Note: The cursor can still be inside our window rect while over another window
+            // that overlaps the edit control (e.g. a child/sibling window). Only treat the
+            // control as hot when it's actually the window under the cursor. (dmex)
+            if (WindowFromPoint(windowPoint) != WindowHandle)
+            {
+                windowPoint.x = LONG_MIN;
+                windowPoint.y = LONG_MIN;
+            }
 
             context->Hot = PhPtInRect(&windowRect, &windowPoint);
 
@@ -1713,8 +1722,9 @@ VOID PhCreateSearchControlEx(
     context->CaseButton.Active = !!PhGetIntegerSetting(context->CaseSetting);
     context->FuzzyButton.Active = !!PhGetIntegerSetting(context->FuzzySetting);
 
-    if (context->FuzzyButton.Active)
-        context->RegexButton.Active = FALSE;
+    // The fuzzy setting is shared by every search control; this control's own regex setting wins.
+    if (context->RegexButton.Active)
+        context->FuzzyButton.Active = FALSE;
 
     // Subclass the Edit control window procedure.
     context->DefaultWindowProc = PhGetWindowProcedure(SearchWindowHandle);

@@ -21,6 +21,16 @@ extern "C" {
 
 extern RECT PhNormalGraphTextMargin;
 extern RECT PhNormalGraphTextPadding;
+typedef struct _PH_GRAPH_RENDER_OPTIONS
+{
+    BOOLEAN Smooth; // anti-aliased renderer; FALSE uses the classic renderer
+    BOOLEAN Motion; // scrolling and morphing between updates; smooth renderer only
+    UCHAR Fill; // PH_GRAPH_FILL
+    UCHAR TextBoxAlpha; // 0-255
+} PH_GRAPH_RENDER_OPTIONS, *PPH_GRAPH_RENDER_OPTIONS;
+
+// Render options of graphs without their own (GCM_SETRENDEROPTIONS).
+extern PH_GRAPH_RENDER_OPTIONS PhGraphRenderOptions;
 
 #define PH_GRAPH_USE_GRID_X 0x1
 #define PH_GRAPH_USE_GRID_Y 0x2
@@ -112,6 +122,114 @@ PhDrawGraphDirect(
     _In_ PPH_GRAPH_DRAW_INFO PH_RESTRICT DrawInfo
     );
 
+// Offset shifts the data right by that many pixels (smooth renderer only).
+PHLIBAPI
+VOID
+NTAPI
+PhDrawGraphDirectEx(
+    _In_ HDC hdc,
+    _In_ PVOID PH_RESTRICT Bits,
+    _In_ PPH_GRAPH_DRAW_INFO PH_RESTRICT DrawInfo,
+    _In_ FLOAT Offset
+    );
+
+// Scrolls graphs drawn with PhDrawGraphDirectEx (tree cells) between updates, like the graph control.
+typedef struct _PH_GRAPH_SCROLL_STATE
+{
+    ULONG64 StartTime; // 0 when not scrolling
+    ULONG64 LastStartTime;
+    ULONG Duration; // ms, the measured update interval
+} PH_GRAPH_SCROLL_STATE, *PPH_GRAPH_SCROLL_STATE;
+
+// Call when the graphs gained a sample. Returns the frame interval in ms, or 0 when scrolling is off.
+PHLIBAPI
+ULONG
+NTAPI
+PhStartGraphScroll(
+    _Inout_ PPH_GRAPH_SCROLL_STATE State
+    );
+
+// Returns FALSE once the scroll has finished; Offset is then 0.
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetGraphScrollOffset(
+    _Inout_ PPH_GRAPH_SCROLL_STATE State,
+    _In_ ULONG Step,
+    _Out_ PFLOAT Offset
+    );
+
+// Keeps a text box from resizing with every change of its text: it widens at once but only
+// narrows after the text has stayed narrower for PH_GRAPH_TEXT_BOX_SHRINK_DELAY ms.
+#define PH_GRAPH_TEXT_BOX_SHRINK_DELAY 5000
+
+typedef struct _PH_GRAPH_TEXT_BOX_STATE
+{
+    LONG Width;
+    ULONG64 NarrowSince; // tick count; 0 while the text is not narrower than the box
+} PH_GRAPH_TEXT_BOX_STATE, *PPH_GRAPH_TEXT_BOX_STATE;
+
+// Call before drawing the box. AnchorRight keeps the right edge fixed (right-aligned boxes).
+FORCEINLINE
+VOID
+PhStabilizeGraphTextBox(
+    _Inout_ PPH_GRAPH_TEXT_BOX_STATE State,
+    _Inout_ PRECT Rect,
+    _In_ BOOLEAN AnchorRight
+    )
+{
+    LONG width = Rect->right - Rect->left;
+    ULONG64 now;
+
+    if (width >= State->Width)
+    {
+        State->Width = width;
+        State->NarrowSince = 0;
+        return;
+    }
+
+    now = NtGetTickCount64();
+
+    if (!State->NarrowSince)
+    {
+        State->NarrowSince = now;
+    }
+    else if (now - State->NarrowSince >= PH_GRAPH_TEXT_BOX_SHRINK_DELAY)
+    {
+        State->Width = width;
+        State->NarrowSince = 0;
+        return;
+    }
+
+    if (AnchorRight)
+        Rect->left = Rect->right - State->Width;
+    else
+        Rect->right = Rect->left + State->Width;
+}
+
+PHLIBAPI
+VOID
+NTAPI
+PhDrawGraphTextBox(
+    _In_ HDC hdc,
+    _In_ PRECT Rect,
+    _In_ COLORREF FillColor,
+    _In_ COLORREF BorderColor
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhDrawGraphBar(
+    _In_ HDC hdc,
+    _In_ PRECT Rect,
+    _In_ COLORREF BackColor,
+    _In_ ULONG Count,
+    _In_reads_(Count) PFLOAT Fractions,
+    _In_reads_(Count) const COLORREF* LineColors,
+    _In_reads_(Count) const COLORREF* FillColors
+    );
+
 PHLIBAPI
 VOID
 NTAPI
@@ -163,6 +281,7 @@ typedef struct _PH_GRAPH_OPTIONS
 #define GCM_SETOPTIONS (WM_USER + 1309)
 #define GCM_UPDATE (WM_USER + 1310)
 #define GCM_SETCALLBACK (WM_USER + 1311)
+#define GCM_SETRENDEROPTIONS (WM_USER + 1312) // lParam: PPH_GRAPH_RENDER_OPTIONS to copy, or NULL to follow PhGraphRenderOptions
 
 #define Graph_GetDrawInfo(hWnd, DrawInfo) \
     SendMessage((hWnd), GCM_GETDRAWINFO, 0, (LPARAM)(DrawInfo))
@@ -185,7 +304,9 @@ typedef struct _PH_GRAPH_OPTIONS
 #define Graph_Update(hWnd) \
     SendMessage((hWnd), GCM_UPDATE, 0, 0)
 #define Graph_SetCallback(hWnd, Callback, Context) \
-    SendMessage((hWnd), GCM_SETCALLBACK, (LPARAM)(Callback), (WPARAM)(Context))
+    SendMessage((hWnd), GCM_SETCALLBACK, (WPARAM)(Callback), (LPARAM)(Context))
+#define Graph_SetRenderOptions(hWnd, RenderOptions) \
+    SendMessage((hWnd), GCM_SETRENDEROPTIONS, 0, (LPARAM)(RenderOptions))
 
 // Notifications
 

@@ -11,6 +11,7 @@
  */
 
 #include <phapp.h>
+#include <sysinfo.h>
 
 #include <commdlg.h>
 #include <colmgr.h>
@@ -26,6 +27,7 @@
 #include <proctree.h>
 #include <phplug.h>
 #include <phsettings.h>
+#include <graphstyles.h>
 
 #define WM_PH_CHILD_EXIT (WM_APP + 301)
 
@@ -58,13 +60,6 @@ INT_PTR CALLBACK PhpOptionsTrayIconDlgProc(
     );
 
 INT_PTR CALLBACK PhpOptionsThemesDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ WPARAM wParam,
-    _In_ LPARAM lParam
-    );
-
-INT_PTR CALLBACK PhpOptionsGraphsDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
@@ -314,16 +309,9 @@ static VOID PhpApplyThemeSupportSetting(
     )
 {
     BOOLEAN enableThemeSupport;
-    BOOLEAN themeSupportWasEnabled;
 
-    themeSupportWasEnabled = !!PhGetIntegerSetting(SETTING_ENABLE_THEME_SUPPORT);
     enableThemeSupport = Button_GetCheck(GetDlgItem(hwndDlg, IDC_ENABLETHEME)) == BST_CHECKED;
     PhSetIntegerSetting(SETTING_ENABLE_THEME_SUPPORT, enableThemeSupport);
-
-    // Enabling theme support forces dark graph backgrounds (GraphColorMode); undo that
-    // override when theme support is turned off so the graphs return to the light colors.
-    if (themeSupportWasEnabled && !enableThemeSupport)
-        PhSetIntegerSetting(SETTING_GRAPH_COLOR_MODE, 0);
 
     PhUpdateCachedSettings();
 
@@ -354,19 +342,13 @@ static VOID PhpApplyThemeModeSetting(
         return;
 
     PhSetIntegerSetting(SETTING_THEME_MODE, mode);
-
-    // Graph drawing keys off GraphColorMode rather than the window palette;
-    // pair a dark palette with dark graph backgrounds (same override the
-    // advanced options page applies).
-    if (PhEnableThemeSupport && PhIsThemeModeDark(mode))
-        PhSetIntegerSetting(SETTING_GRAPH_COLOR_MODE, 1);
-
     PhUpdateCachedSettings();
 
     if (PhEnableThemeSupport)
     {
         PhApplyThemeModeWithColors(mode, PhMainWndHandle);
         PhMwpInitializeMainMenu(PhMainWndHandle);
+        PhSiNotifyChangeSettings();
     }
 }
 
@@ -457,7 +439,7 @@ INT_PTR CALLBACK PhOptionsDialogProc(
                 PhOptionsCreateSectionAdvanced(L"Advanced", PhInstanceHandle, MAKEINTRESOURCE(IDD_OPTADVANCED), PhpOptionsAdvancedDlgProc, NULL);
                 PhOptionsCreateSection(L"Highlighting", PhInstanceHandle, MAKEINTRESOURCE(IDD_OPTHIGHLIGHTING), PhpOptionsHighlightingDlgProc, NULL);
                 PhOptionsCreateSection(L"Tray Icon", PhInstanceHandle, MAKEINTRESOURCE(IDD_OPTTRAYICON), PhpOptionsTrayIconDlgProc, NULL);
-                PhOptionsCreateSection(L"Graphs", PhInstanceHandle, MAKEINTRESOURCE(IDD_OPTGRAPHS), PhpOptionsGraphsDlgProc, NULL);
+                PhOptionsCreateSection(L"Graphs", PhInstanceHandle, MAKEINTRESOURCE(IDD_OPTGRAPHS), PhGsOptionsPageDlgProc, NULL);
                 PhOptionsCreateSection(L"Plugins", PhInstanceHandle, MAKEINTRESOURCE(IDD_PLUGINS), PhPluginsDlgProc, NULL);
 
                 if (PhPluginsEnabled)
@@ -1810,12 +1792,9 @@ static VOID PhpAdvancedPageSave(
 {
     HWND listViewHandle;
     ULONG sampleCount;
-    BOOLEAN themeSupportWasEnabled;
 
     if (!hwndDlg)
         return;
-
-    themeSupportWasEnabled = !!PhGetIntegerSetting(SETTING_ENABLE_THEME_SUPPORT);
 
     listViewHandle = GetDlgItem(hwndDlg, IDC_SETTINGS);
     sampleCount = PhGetDialogItemValue(hwndDlg, IDC_SAMPLECOUNT);
@@ -1884,15 +1863,6 @@ static VOID PhpAdvancedPageSave(
     SetSettingForLvItemCheck(listViewHandle, PHP_OPTIONS_INDEX_SHOW_ADVANCED_OPTIONS, SETTING_ENABLE_ADVANCED_OPTIONS);
     if (WindowsVersion >= WINDOWS_10)
         SetSettingForLvItemCheckRestartRequired(listViewHandle, PHP_OPTIONS_INDEX_PROCESS_MONITOR, SETTING_ENABLE_PROCESS_MONITOR);
-
-    if (PhGetIntegerSetting(SETTING_ENABLE_THEME_SUPPORT)) // PhGetIntegerSetting required (dmex)
-    {
-        PhSetIntegerSetting(SETTING_GRAPH_COLOR_MODE, 1); // HACK switch to dark theme. (dmex)
-    }
-    else if (themeSupportWasEnabled)
-    {
-        PhSetIntegerSetting(SETTING_GRAPH_COLOR_MODE, 0); // Undo the override above when theme support is turned off.
-    }
 
     WriteCurrentUserRun(
         ListView_GetCheckState(listViewHandle, PHP_OPTIONS_INDEX_START_ATLOGON) == BST_CHECKED,
@@ -4518,224 +4488,3 @@ INT_PTR CALLBACK PhpOptionsThemesDlgProc(
     return FALSE;
 }
 
-static COLOR_ITEM PhpOptionsGraphColorItems[] =
-{
-    COLOR_ITEM(SETTING_COLOR_CPU_KERNEL, 0, L"CPU kernel", L"CPU kernel"),
-    COLOR_ITEM(SETTING_COLOR_CPU_USER, 0, L"CPU user", L"CPU user"),
-    COLOR_ITEM(SETTING_COLOR_IO_READ_OTHER, 0, L"I/O R+O", L"I/O R+O"),
-    COLOR_ITEM(SETTING_COLOR_IO_WRITE, 0, L"I/O W", L"I/O W"),
-    COLOR_ITEM(SETTING_COLOR_PRIVATE, 0, L"Private bytes", L"Private bytes"),
-    COLOR_ITEM(SETTING_COLOR_PHYSICAL, 0, L"Physical memory", L"Physical memory"),
-    COLOR_ITEM(SETTING_COLOR_POWER_USAGE, 0, L"Power usage", L"Power usage"),
-    COLOR_ITEM(SETTING_COLOR_TEMPERATURE, 0, L"Temperature", L"Temperature"),
-    COLOR_ITEM(SETTING_COLOR_FAN_RPM, 0, L"Fan RPM", L"Fan RPM"),
-};
-static HWND PhpGraphListViewHandle = NULL;
-
-INT_PTR CALLBACK PhpOptionsGraphsDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ WPARAM wParam,
-    _In_ LPARAM lParam
-    )
-{
-    static PH_LAYOUT_MANAGER LayoutManager;
-
-    switch (uMsg)
-    {
-    case WM_INITDIALOG:
-        {
-            // Show Text
-            SetDlgItemCheckForSetting(hwndDlg, IDC_SHOWTEXT, SETTING_GRAPH_SHOW_TEXT);
-            SetDlgItemCheckForSetting(hwndDlg, IDC_USEOLDCOLORS, SETTING_GRAPH_COLOR_MODE);
-            SetDlgItemCheckForSetting(hwndDlg, IDC_SHOWCOMMITINSUMMARY, SETTING_SHOW_COMMIT_IN_SUMMARY);
-
-            // Highlighting
-            PhpGraphListViewHandle = GetDlgItem(hwndDlg, IDC_LIST);
-            PhSetListViewStyle(PhpGraphListViewHandle, FALSE, TRUE);
-            PhAddListViewColumn(PhpGraphListViewHandle, 0, 0, 0, LVCFMT_LEFT, 240, L"Name");
-            PhSetExtendedListView(PhpGraphListViewHandle);
-            ExtendedListView_SetItemColorFunction(PhpGraphListViewHandle, PhpColorItemColorFunction);
-
-            for (ULONG i = 0; i < RTL_NUMBER_OF(PhpOptionsGraphColorItems); i++)
-            {
-                INT lvItemIndex = PhAddListViewItem(PhpGraphListViewHandle, MAXINT, PhpOptionsGraphColorItems[i].Name, &PhpOptionsGraphColorItems[i]);
-                PhpOptionsGraphColorItems[i].CurrentColor = PhGetIntegerSetting(PhpOptionsGraphColorItems[i].SettingName);
-            }
-
-            PhInitializeLayoutManager(&LayoutManager, hwndDlg);
-            PhAddLayoutItem(&LayoutManager, PhpGraphListViewHandle, NULL, PH_ANCHOR_ALL);
-
-            if (PhGetIntegerSetting(SETTING_GRAPH_COLOR_MODE))
-                EnableWindow(PhpGraphListViewHandle, TRUE);
-            else if (PhEnableThemeSupport)
-            {
-                ShowWindow(PhpGraphListViewHandle, SW_HIDE);
-                EnableWindow(PhpGraphListViewHandle, TRUE);
-            }
-        }
-        break;
-    case WM_DESTROY:
-        {
-            SetSettingForDlgItemCheck(hwndDlg, IDC_SHOWTEXT, SETTING_GRAPH_SHOW_TEXT);
-            SetSettingForDlgItemCheck(hwndDlg, IDC_USEOLDCOLORS, SETTING_GRAPH_COLOR_MODE);
-            SetSettingForDlgItemCheck(hwndDlg, IDC_SHOWCOMMITINSUMMARY, SETTING_SHOW_COMMIT_IN_SUMMARY);
-
-            for (ULONG i = 0; i < RTL_NUMBER_OF(PhpOptionsGraphColorItems); i++)
-            {
-                PhSetIntegerSetting(PhpOptionsGraphColorItems[i].SettingName, PhpOptionsGraphColorItems[i].CurrentColor);
-            }
-
-             PhDeleteLayoutManager(&LayoutManager);
-         }
-         break;
-     case WM_DPICHANGED_AFTERPARENT:
-         {
-             PhLayoutManagerUpdate(&LayoutManager, PhGetWindowDpi(hwndDlg));
-             PhLayoutManagerLayout(&LayoutManager);
-         }
-         break;
-     case WM_SIZE:
-         {
-             PhLayoutManagerLayout(&LayoutManager);
-
-             ExtendedListView_SetColumnWidth(PhpGraphListViewHandle, 0, ELVSCW_AUTOSIZE_REMAININGSPACE);
-         }
-         break;
-     case WM_COMMAND:
-         {
-             switch (GET_WM_COMMAND_ID(wParam, lParam))
-             {
-             case IDC_USEOLDCOLORS:
-                {
-                    ListView_SetItemState(PhpGraphListViewHandle, -1, 0, LVIS_SELECTED); // deselect all items
-
-                    if (PhEnableThemeSupport)
-                        ShowWindow(PhpGraphListViewHandle, Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED ? SW_SHOW : SW_HIDE);
-                    else
-                        EnableWindow(PhpGraphListViewHandle, Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED);
-                }
-                break;
-            }
-        }
-        break;
-    case WM_NOTIFY:
-        {
-            LPNMHDR header = (LPNMHDR)lParam;
-
-            switch (header->code)
-            {
-            case NM_DBLCLK:
-                {
-                    if (header->hwndFrom == PhpGraphListViewHandle)
-                    {
-                        PCOLOR_ITEM item;
-
-                        if (item = PhGetSelectedListViewItemParam(PhpGraphListViewHandle))
-                        {
-                            CHOOSECOLOR chooseColor;
-                            COLORREF customColors[16] = { 0 };
-
-                            PhLoadCustomColorList(SETTING_OPTIONS_CUSTOM_COLOR_LIST, customColors, RTL_NUMBER_OF(customColors));
-
-                            memset(&chooseColor, 0, sizeof(CHOOSECOLOR));
-                            chooseColor.lStructSize = sizeof(CHOOSECOLOR);
-                            chooseColor.hwndOwner = hwndDlg;
-                            chooseColor.rgbResult = item->CurrentColor;
-                            chooseColor.lpCustColors = customColors;
-                            chooseColor.lpfnHook = PhpColorDlgHookProc;
-                            chooseColor.Flags = CC_ANYCOLOR | CC_FULLOPEN | CC_SOLIDCOLOR | CC_ENABLEHOOK | CC_RGBINIT;
-
-                            if (ChooseColor(&chooseColor))
-                            {
-                                item->CurrentColor = chooseColor.rgbResult;
-                                InvalidateRect(PhpGraphListViewHandle, NULL, TRUE);
-                            }
-
-                            PhSaveCustomColorList(SETTING_OPTIONS_CUSTOM_COLOR_LIST, customColors, RTL_NUMBER_OF(customColors));
-
-                            ListView_SetItemState(PhpGraphListViewHandle, -1, 0, LVIS_SELECTED);
-                        }
-                    }
-                }
-                break;
-            case LVN_GETINFOTIP:
-                {
-                    if (header->hwndFrom == PhpGraphListViewHandle)
-                    {
-                        NMLVGETINFOTIP* getInfoTip = (NMLVGETINFOTIP*)lParam;
-                        PH_STRINGREF tip;
-
-                        PhInitializeStringRefLongHint(&tip, ColorItems[getInfoTip->iItem].Description);
-                        PhCopyListViewInfoTip(getInfoTip, &tip);
-                    }
-                }
-                break;
-            }
-
-            if (IsWindowEnabled(PhpGraphListViewHandle)) // HACK: Move to WM_COMMAND (dmex)
-            {
-                REFLECT_MESSAGE_DLG(hwndDlg, PhpGraphListViewHandle, uMsg, wParam, lParam);
-            }
-        }
-        break;
-    case WM_CONTEXTMENU:
-        {
-            if ((HWND)wParam == PhpGraphListViewHandle)
-            {
-                POINT point;
-                PPH_EMENU menu;
-                PPH_EMENU item;
-                PCOLOR_ITEM ColorItem;
-
-                point.x = GET_X_LPARAM(lParam);
-                point.y = GET_Y_LPARAM(lParam);
-
-                if (point.x == -1 && point.y == -1)
-                    PhGetListViewContextMenuPoint(PhpGraphListViewHandle, &point);
-
-                if (ColorItem = PhGetSelectedListViewItemParam(PhpGraphListViewHandle))
-                {
-                    menu = PhCreateEMenu();
-                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, IDC_RESET, L"&Reset", NULL, NULL), ULONG_MAX);
-
-                    item = PhShowEMenu(
-                        menu,
-                        hwndDlg,
-                        PH_EMENU_SHOW_LEFTRIGHT,
-                        PH_ALIGN_LEFT | PH_ALIGN_TOP,
-                        point.x,
-                        point.y
-                        );
-
-                    if (item && item->Id == IDC_RESET)
-                    {
-                        PPH_SETTING Color;
-
-                        PH_STRINGREF SettingName;
-
-                        PhInitializeStringRef(&SettingName, ColorItem->SettingName);
-                        Color = PhGetSetting(&SettingName);
-
-                        PhSettingFromString(Color->Type, &Color->DefaultValue, NULL, Color);
-
-                        ColorItem->CurrentColor = Color->u.Integer;
-
-                        ListView_SetItemState(PhpGraphListViewHandle, -1, 0, LVIS_SELECTED);
-                    }
-
-                    PhDestroyEMenu(menu);
-                }
-            }
-        }
-        break;
-    case WM_CTLCOLORBTN:
-        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
-    case WM_CTLCOLORDLG:
-        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
-    case WM_CTLCOLORSTATIC:
-        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
-    }
-
-    return FALSE;
-}

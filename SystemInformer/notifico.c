@@ -11,6 +11,7 @@
  */
 
 #include <phapp.h>
+#include <sysinfo.h>
 #include <phsettings.h>
 
 #include <shellapi.h>
@@ -294,7 +295,7 @@ VOID PhNfCreateIconThreadDelayed(
 PPH_NF_ICON PhNfRegisterIcon(
     _In_opt_ PPH_PLUGIN Plugin,
     _In_ ULONG Id,
-    _In_ GUID Guid,
+    _In_ PCGUID Guid,
     _In_opt_ PVOID Context,
     _In_ PCWSTR Text,
     _In_ ULONG Flags,
@@ -315,7 +316,7 @@ PPH_NF_ICON PhNfRegisterIcon(
     icon->MessageCallback = MessageCallback;
     icon->TextCache = PhReferenceEmptyString();
     icon->IconId = PhTrayIconItemList->Count + 1; // HACK
-    icon->IconGuid = Guid;
+    icon->IconGuid = *Guid;
 
     PhAddItemList(PhTrayIconItemList, icon);
 
@@ -326,7 +327,7 @@ _Function_class_(PH_REGISTER_TRAY_ICON)
 PPH_NF_ICON PhNfPluginRegisterIcon(
     _In_ PPH_PLUGIN Plugin,
     _In_ ULONG SubId,
-    _In_ GUID Guid,
+    _In_ PCGUID Guid,
     _In_opt_ PVOID Context,
     _In_ PCWSTR Text,
     _In_ ULONG Flags,
@@ -358,16 +359,16 @@ VOID PhNfLoadStage2(
         PhNfLoadGuids();
     }
 
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_CPU_USAGE, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_CPU_USAGE], NULL, L"CPU &usage", 0, PhNfpCpuUsageIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_CPU_HISTORY, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_CPU_HISTORY], NULL, L"CPU &history", 0, PhNfpCpuHistoryIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_IO_HISTORY, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_IO_HISTORY], NULL, L"&I/O history", 0, PhNfpIoHistoryIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_COMMIT_HISTORY, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_COMMIT_HISTORY], NULL, L"&Commit charge history", 0, PhNfpCommitHistoryIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_PHYSICAL_HISTORY, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_PHYSICAL_HISTORY], NULL, L"&Physical memory history", 0, PhNfpPhysicalHistoryIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_CPU_TEXT, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_CPU_TEXT], NULL, L"CPU usage (text)", 0, PhNfpCpuUsageTextIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_IO_TEXT, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_IO_TEXT], NULL, L"IO usage (text)", 0, PhNfpIoUsageTextIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_COMMIT_TEXT, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_COMMIT_TEXT], NULL, L"Commit usage (text)", 0, PhNfpCommitTextIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_PHYSICAL_TEXT, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_PHYSICAL_TEXT], NULL, L"Physical usage (text)", 0, PhNfpPhysicalUsageTextIconUpdateCallback, NULL);
-    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_PLAIN_ICON, PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_PLAIN_ICON], NULL, L"System Informer icon (static)", 0, PhNfpPlainIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_CPU_USAGE, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_CPU_USAGE], NULL, L"CPU &usage", 0, PhNfpCpuUsageIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_CPU_HISTORY, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_CPU_HISTORY], NULL, L"CPU &history", 0, PhNfpCpuHistoryIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_IO_HISTORY, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_IO_HISTORY], NULL, L"&I/O history", 0, PhNfpIoHistoryIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_COMMIT_HISTORY, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_COMMIT_HISTORY], NULL, L"&Commit charge history", 0, PhNfpCommitHistoryIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_PHYSICAL_HISTORY, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_PHYSICAL_HISTORY], NULL, L"&Physical memory history", 0, PhNfpPhysicalHistoryIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_CPU_TEXT, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_CPU_TEXT], NULL, L"CPU usage (text)", 0, PhNfpCpuUsageTextIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_IO_TEXT, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_IO_TEXT], NULL, L"IO usage (text)", 0, PhNfpIoUsageTextIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_COMMIT_TEXT, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_COMMIT_TEXT], NULL, L"Commit usage (text)", 0, PhNfpCommitTextIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_PHYSICAL_TEXT, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_PHYSICAL_TEXT], NULL, L"Physical usage (text)", 0, PhNfpPhysicalUsageTextIconUpdateCallback, NULL);
+    PhNfRegisterIcon(NULL, PH_TRAY_ICON_ID_PLAIN_ICON, &PhNfpTrayIconItemGuids[PH_TRAY_ICON_GUID_PLAIN_ICON], NULL, L"System Informer icon (static)", 0, PhNfpPlainIconUpdateCallback, NULL);
 
     if (PhPluginsEnabled)
     {
@@ -1076,8 +1077,13 @@ HICON PhNfpGetBlackIcon(
 
         PhNfpBeginBitmap2(&PhNfpBlackBitmapContext, &width, &height, &PhNfpBlackBitmap, &bits, &hdc, &oldBitmap);
 
-        if (!NT_SUCCESS(RtlSizeTMult(width, height, &bitsSize)) ||
-            !NT_SUCCESS(RtlSizeTMult(bitsSize, sizeof(RGBQUAD), &bitsSize)))
+        if (!NT_SUCCESS(RtlSIZETMult(width, height, &bitsSize)))
+        {
+            SelectBitmap(hdc, oldBitmap);
+            return NULL;
+        }
+
+        if (!NT_SUCCESS(RtlSIZETMult(bitsSize, sizeof(RGBQUAD), &bitsSize)))
         {
             SelectBitmap(hdc, oldBitmap);
             return NULL;
@@ -1673,6 +1679,7 @@ VOID PhNfpCpuHistoryIconUpdateCallback(
     PVOID bits;
     HDC hdc;
     HBITMAP oldBitmap;
+    BOOLEAN transparent;
     HANDLE maxCpuProcessId;
     PPH_PROCESS_ITEM maxCpuProcessItem;
     PH_FORMAT format[8];
@@ -1694,13 +1701,10 @@ VOID PhNfpCpuHistoryIconUpdateCallback(
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
     drawInfo.LineData2 = lineData2;
-    drawInfo.LineColor1 = PhCsColorCpuKernel;
-    drawInfo.LineColor2 = PhCsColorCpuUser;
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(PhCsColorCpuKernel);
-    drawInfo.LineBackColor2 = PhHalveColorBrightness(PhCsColorCpuUser);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhCsColorCpuKernel, PhCsColorCpuUser, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (PhNfTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -1779,6 +1783,7 @@ VOID PhNfpIoHistoryIconUpdateCallback(
     PVOID bits;
     HDC hdc;
     HBITMAP oldBitmap;
+    BOOLEAN transparent;
     HANDLE maxIoProcessId;
     PPH_PROCESS_ITEM maxIoProcessItem;
     PH_FORMAT format[8];
@@ -1814,13 +1819,10 @@ VOID PhNfpIoHistoryIconUpdateCallback(
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
     drawInfo.LineData2 = lineData2;
-    drawInfo.LineColor1 = PhCsColorIoReadOther;
-    drawInfo.LineColor2 = PhCsColorIoWrite;
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(PhCsColorIoReadOther);
-    drawInfo.LineBackColor2 = PhHalveColorBrightness(PhCsColorIoWrite);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhCsColorIoReadOther, PhCsColorIoWrite, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (PhNfTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -1897,6 +1899,7 @@ VOID PhNfpCommitHistoryIconUpdateCallback(
     PVOID bits;
     HDC hdc;
     HBITMAP oldBitmap;
+    BOOLEAN transparent;
     FLOAT commitFraction;
     PH_FORMAT format[5];
 
@@ -1918,11 +1921,10 @@ VOID PhNfpCommitHistoryIconUpdateCallback(
 
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
-    drawInfo.LineColor1 = PhCsColorPrivate;
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(PhCsColorPrivate);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhCsColorPrivate, 0, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (PhNfTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -1982,6 +1984,7 @@ VOID PhNfpPhysicalHistoryIconUpdateCallback(
     PVOID bits;
     HDC hdc;
     HBITMAP oldBitmap;
+    BOOLEAN transparent;
     ULONG_PTR physicalUsage;
     FLOAT physicalFraction;
     PH_FORMAT format[5];
@@ -2004,11 +2007,10 @@ VOID PhNfpPhysicalHistoryIconUpdateCallback(
 
     drawInfo.LineDataCount = lineDataCount;
     drawInfo.LineData1 = lineData1;
-    drawInfo.LineColor1 = PhCsColorPhysical;
-    drawInfo.LineBackColor1 = PhHalveColorBrightness(PhCsColorPhysical);
+    transparent = PhSiSetGraphStyleColors(&drawInfo, PhCsColorPhysical, 0, PhGraphSurfaceIcon);
     PhDrawGraphDirect(hdc, bits, &drawInfo);
 
-    if (PhNfTransparencyEnabled)
+    if (transparent)
     {
         PhBitmapSetAlpha(bits, drawInfo.Width, drawInfo.Height);
     }
@@ -2072,7 +2074,7 @@ VOID PhNfpCpuUsageIconUpdateCallback(
         HPEN dcPen;
         POINT points[2];
 
-        dcBrush = PhGetStockBrush(DC_BRUSH);
+        dcBrush = PhStockDcBrush;
         dcPen = PhGetStockPen(DC_PEN);
         rect.left = 0;
         rect.top = 0;

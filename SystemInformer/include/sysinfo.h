@@ -13,6 +13,8 @@
 #ifndef PH_SYSINFO_H
 #define PH_SYSINFO_H
 
+#include <graphstyle.h>
+
 EXTERN_C_START
 
 // begin_phapppub
@@ -155,6 +157,8 @@ typedef struct _PH_SYSINFO_SECTION
 
     WNDPROC GraphWindowProc;
     WNDPROC PanelWindowProc;
+
+    PH_GRAPH_TEXT_BOX_STATE PanelTextBoxState;
 // begin_phapppub
 } PH_SYSINFO_SECTION, *PPH_SYSINFO_SECTION;
 // end_phapppub
@@ -163,13 +167,36 @@ VOID PhSiNotifyChangeSettings(
     VOID
     );
 
+typedef enum _PH_SI_GRAPH_PALETTE
+{
+    PhSiGraphPaletteLight,
+    PhSiGraphPaletteDark
+} PH_SI_GRAPH_PALETTE;
+
+// Light or dark, as the graph styles resolve the mode.
+PH_SI_GRAPH_PALETTE PhSiGetGraphPalette(
+    VOID
+    );
+
 // begin_phapppub
+// Sets the background, grid, text and line colors of a graph from the active graph style.
+// Returns TRUE when the background is transparent (icons only).
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhSiSetGraphStyleColors(
+    _Inout_ PPH_GRAPH_DRAW_INFO DrawInfo,
+    _In_ COLORREF Color1,
+    _In_ COLORREF Color2,
+    _In_ PH_GRAPH_SURFACE Surface
+    );
+
 _Function_class_(PH_SYSINFO_COLOR_SETUP_FUNCTION)
 PHAPPAPI
 VOID
 NTAPI
 PhSiSetColorsGraphDrawInfo(
-    _Out_ PPH_GRAPH_DRAW_INFO DrawInfo,
+    _Inout_ PPH_GRAPH_DRAW_INFO DrawInfo,
     _In_ COLORREF Color1,
     _In_ COLORREF Color2,
     _In_ LONG WindowDpi

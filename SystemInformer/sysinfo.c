@@ -43,6 +43,7 @@
 
 #include <mainwnd.h>
 #include <guisup.h>
+#include <graphstyles.h>
 #include <phplug.h>
 #include <phsettings.h>
 #include <emenu.h>
@@ -86,15 +87,15 @@ static VOID PhSipFillContainerBackground(
     _In_ PRECT rect
     )
 {
-    switch (PhCsGraphColorMode)
+    switch (PhSiGetGraphPalette())
     {
-    case 0: // New colors
+    case PhSiGraphPaletteLight:
         SetDCBrushColor(hdc, GetSysColor(COLOR_WINDOW));
-        FillRect(hdc, rect, PhGetStockBrush(DC_BRUSH));
+        FillRect(hdc, rect, PhStockDcBrush);
         break;
-    case 1: // Old colors
+    case PhSiGraphPaletteDark:
         SetDCBrushColor(hdc, PhThemeWindowBackgroundColor);
-        FillRect(hdc, rect, PhGetStockBrush(DC_BRUSH));
+        FillRect(hdc, rect, PhStockDcBrush);
         break;
     }
 }
@@ -495,13 +496,13 @@ INT_PTR CALLBACK PhSipSysInfoDialogProc(
 
             if (PhEnableThemeSupport)
             {
-                switch (PhCsGraphColorMode)
+                switch (PhSiGetGraphPalette())
                 {
-                case 0: // New colors
+                case PhSiGraphPaletteLight:
                     SetTextColor((HDC)wParam, RGB(0x0, 0x0, 0x0));
                     SetDCBrushColor((HDC)wParam, RGB(0xef, 0xef, 0xef)); // GetSysColor(COLOR_WINDOW)
                     break;
-                case 1: // Old colors
+                case PhSiGraphPaletteDark:
                     SetTextColor((HDC)wParam, RGB(0xff, 0xff, 0xff));
                     SetDCBrushColor((HDC)wParam, PhThemeWindowBackgroundColor); // RGB(30, 30, 30));
                     break;
@@ -513,7 +514,7 @@ INT_PTR CALLBACK PhSipSysInfoDialogProc(
                 SetDCBrushColor((HDC)wParam, GetSysColor(COLOR_WINDOW));
             }
 
-            return (INT_PTR)PhGetStockBrush(DC_BRUSH);
+            return (INT_PTR)PhStockDcBrush;
         }
         break;
     case WM_DPICHANGED:
@@ -584,13 +585,13 @@ INT_PTR CALLBACK PhSipContainerDialogProc(
 
             if (PhEnableThemeSupport)
             {
-                switch (PhCsGraphColorMode)
+                switch (PhSiGetGraphPalette())
                 {
-                case 0: // New colors
+                case PhSiGraphPaletteLight:
                     SetTextColor((HDC)wParam, RGB(0x0, 0x0, 0x0));
                     SetDCBrushColor((HDC)wParam, GetSysColor(COLOR_WINDOW));
                     break;
-                case 1: // Old colors
+                case PhSiGraphPaletteDark:
                     SetTextColor((HDC)wParam, RGB(0xff, 0xff, 0xff));
                     SetDCBrushColor((HDC)wParam, PhThemeWindowBackgroundColor);
                     break;
@@ -602,7 +603,7 @@ INT_PTR CALLBACK PhSipContainerDialogProc(
                 SetDCBrushColor((HDC)wParam, GetSysColor(COLOR_WINDOW));
             }
 
-            return (INT_PTR)PhGetStockBrush(DC_BRUSH);
+            return (INT_PTR)PhStockDcBrush;
         }
         break;
     }
@@ -1321,9 +1322,41 @@ static VOID PhSipDeleteGraphFonts(
     DrawInfo->CachedFontDpi = 0;
 }
 
+PH_SI_GRAPH_PALETTE PhSiGetGraphPalette(
+    VOID
+    )
+{
+    return PhGsIsDarkMode() ? PhSiGraphPaletteDark : PhSiGraphPaletteLight;
+}
+
+BOOLEAN PhSiSetGraphStyleColors(
+    _Inout_ PPH_GRAPH_DRAW_INFO DrawInfo,
+    _In_ COLORREF Color1,
+    _In_ COLORREF Color2,
+    _In_ PH_GRAPH_SURFACE Surface
+    )
+{
+    PH_GRAPH_STYLE_COLORS colors;
+
+    if (!PhGsGetStyleColors(Surface, &colors))
+        ClearFlag(DrawInfo->Flags, PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y);
+
+    DrawInfo->BackColor = colors.BackColor;
+    DrawInfo->GridColor = colors.GridColor;
+    DrawInfo->TextColor = colors.TextColor;
+    DrawInfo->TextBoxColor = colors.TextBoxColor;
+    DrawInfo->LabelYColor = colors.LabelYColor;
+    DrawInfo->LineColor1 = Color1;
+    DrawInfo->LineBackColor1 = PhGsDeriveFillColor(Color1, colors.BackColor, colors.TransparentBack);
+    DrawInfo->LineColor2 = Color2;
+    DrawInfo->LineBackColor2 = PhGsDeriveFillColor(Color2, colors.BackColor, colors.TransparentBack);
+
+    return colors.TransparentBack;
+}
+
 _Function_class_(PH_SYSINFO_COLOR_SETUP_FUNCTION)
 VOID PhSiSetColorsGraphDrawInfo(
-    _Out_ PPH_GRAPH_DRAW_INFO DrawInfo,
+    _Inout_ PPH_GRAPH_DRAW_INFO DrawInfo,
     _In_ COLORREF Color1,
     _In_ COLORREF Color2,
     _In_ LONG WindowDpi
@@ -1355,33 +1388,7 @@ VOID PhSiSetColorsGraphDrawInfo(
 
     DrawInfo->TextFont = DrawInfo->CachedTextFont;
 
-    // Set up the colors.
-
-    switch (PhCsGraphColorMode)
-    {
-    case 0: // New colors
-        DrawInfo->BackColor = RGB(0xef, 0xef, 0xef);
-        DrawInfo->LineColor1 = PhHalveColorBrightness(Color1);
-        DrawInfo->LineBackColor1 = PhMakeColorBrighter(Color1, 125);
-        DrawInfo->LineColor2 = PhHalveColorBrightness(Color2);
-        DrawInfo->LineBackColor2 = PhMakeColorBrighter(Color2, 125);
-        DrawInfo->GridColor = RGB(0xc7, 0xc7, 0xc7);
-        DrawInfo->LabelYColor = RGB(0xa0, 0x60, 0x20);
-        DrawInfo->TextColor = RGB(0x00, 0x00, 0x00);
-        DrawInfo->TextBoxColor = RGB(0xe7, 0xe7, 0xe7);
-        break;
-    case 1: // Old colors
-        DrawInfo->BackColor = RGB(0x00, 0x00, 0x00);
-        DrawInfo->LineColor1 = Color1;
-        DrawInfo->LineBackColor1 = PhHalveColorBrightness(Color1);
-        DrawInfo->LineColor2 = Color2;
-        DrawInfo->LineBackColor2 = PhHalveColorBrightness(Color2);
-        DrawInfo->GridColor = RGB(0x00, 0x57, 0x00);
-        DrawInfo->LabelYColor = RGB(0xd0, 0xa0, 0x70);
-        DrawInfo->TextColor = RGB(0x00, 0xff, 0x00);
-        DrawInfo->TextBoxColor = RGB(0x00, 0x22, 0x00);
-        break;
-    }
+    PhSiSetGraphStyleColors(DrawInfo, Color1, Color2, PhGraphSurfacePanel);
 }
 
 _Function_class_(PH_GRAPH_LABEL_Y_FUNCTION)
@@ -1588,16 +1595,24 @@ VOID PhSipUpdateColorParameters(
     VOID
     )
 {
-    switch (PhCsGraphColorMode)
+    switch (PhSiGetGraphPalette())
     {
-    case 0: // New colors
+    case PhSiGraphPaletteLight:
         CurrentParameters.GraphBackColor = RGB(0xef, 0xef, 0xef);
         CurrentParameters.PanelForeColor = RGB(0x00, 0x00, 0x00);
         break;
-    case 1: // Old colors
-        CurrentParameters.GraphBackColor = RGB(0x00, 0x00, 0x00);
-        CurrentParameters.PanelForeColor = RGB(0xff, 0xff, 0xff);
+    case PhSiGraphPaletteDark:
+        CurrentParameters.GraphBackColor = PhThemeWindowBackgroundColor;
+        CurrentParameters.PanelForeColor = PhThemeWindowTextColor;
         break;
+    }
+
+    // Graph backgrounds come from the graph style.
+    {
+        PH_GRAPH_STYLE_COLORS colors;
+
+        PhGsGetStyleColors(PhGraphSurfacePanel, &colors);
+        CurrentParameters.GraphBackColor = colors.BackColor;
     }
 }
 
@@ -1742,25 +1757,24 @@ VOID PhSipDrawRestoreSummaryPanel(
 
     if (PhEnableThemeSupport)
     {
-        switch (PhCsGraphColorMode)
+        switch (PhSiGetGraphPalette())
         {
-        case 0: // New colors
+        case PhSiGraphPaletteLight:
             SetTextColor(bufferDc, RGB(0x00, 0x00, 0x00));
             SetDCBrushColor(bufferDc, RGB(0xff, 0xff, 0xff));
-            FillRect(bufferDc, &bufferRect, PhGetStockBrush(DC_BRUSH));
+            FillRect(bufferDc, &bufferRect, PhStockDcBrush);
             break;
-        case 1: // Old colors
+        case PhSiGraphPaletteDark:
         default:
             SetTextColor(bufferDc, PhThemeWindowTextColor);
-            SetDCBrushColor(bufferDc, PhThemeWindowBackgroundColor);
-            FillRect(bufferDc, &bufferRect, PhGetStockBrush(DC_BRUSH));
+            FillRect(bufferDc, &bufferRect, PhThemeWindowBackgroundBrush);
             break;
         }
     }
     else
     {
-        SetTextColor(bufferDc, GetSysColor(COLOR_WINDOWTEXT));
-        FillRect(bufferDc, &bufferRect, (HBRUSH)(COLOR_WINDOW + 1));
+        SetTextColor(bufferDc, PhThemeWindowTextColor);
+        FillRect(bufferDc, &bufferRect, PhThemeWindowBackgroundBrush);
     }
 
     if (RestoreSummaryControlHot || RestoreSummaryControlHasFocus)
@@ -1778,7 +1792,7 @@ VOID PhSipDrawRestoreSummaryPanel(
         }
         else
         {
-            FillRect(bufferDc, &bufferRect, (HBRUSH)(COLOR_WINDOW + 1));
+            FillRect(bufferDc, &bufferRect, PhThemeWindowBackgroundBrush);
         }
     }
 
@@ -1824,9 +1838,9 @@ VOID PhSipDrawSeparator(
 
     if (PhEnableThemeSupport)
     {
-        switch (PhCsGraphColorMode)
+        switch (PhSiGetGraphPalette())
         {
-        case 0: // New colors
+        case PhSiGraphPaletteLight:
             {
                 //FillRect(bufferDc, &bufferRect, GetSysColorBrush(COLOR_3DFACE));
                 //bufferRect.left += 1;
@@ -1834,10 +1848,10 @@ VOID PhSipDrawSeparator(
                 //bufferRect.left -= 1;
             }
             break;
-        case 1: // Old colors
+        case PhSiGraphPaletteDark:
             {
                 SetDCBrushColor(bufferDc, PhThemeWindowBackgroundColor);
-                FillRect(bufferDc, &bufferRect, PhGetStockBrush(DC_BRUSH));
+                FillRect(bufferDc, &bufferRect, PhStockDcBrush);
             }
             break;
         }
@@ -1850,7 +1864,7 @@ VOID PhSipDrawSeparator(
         //bufferRect.left -= 1;
 
         SetDCBrushColor(bufferDc, RGB(0xff, 0xff, 0xff));
-        FillRect(bufferDc, &bufferRect, PhGetStockBrush(DC_BRUSH));
+        FillRect(bufferDc, &bufferRect, PhStockDcBrush);
     }
 
     BitBlt(
@@ -1882,13 +1896,13 @@ VOID PhSipDrawPanel(
     {
         if (PhEnableThemeSupport)
         {
-            switch (PhCsGraphColorMode)
+            switch (PhSiGetGraphPalette())
             {
-            case 0: // New colors
+            case PhSiGraphPaletteLight:
                 SetDCBrushColor(hdc, RGB(0xff, 0xff, 0xff));
                 FillRect(hdc, Rect, PhGetStockBrush(DC_BRUSH));
                 break;
-            case 1: // Old colors
+            case PhSiGraphPaletteDark:
             default:
                 SetDCBrushColor(hdc, PhThemeWindowBackgroundColor);
                 FillRect(hdc, Rect, PhGetStockBrush(DC_BRUSH));
@@ -1910,7 +1924,7 @@ VOID PhSipDrawPanel(
         //        break;
         //    case 1: // Old colors
         //        SetDCBrushColor(hdc, RGB(30, 30, 30));
-        //        FillRect(hdc, Rect, PhGetStockBrush(DC_BRUSH));
+        //        FillRect(hdc, Rect, PhStockDcBrush);
         //        break;
         //    }
         //}
@@ -2042,17 +2056,17 @@ VOID PhSipDefaultDrawPanel(
 
     if (PhEnableThemeSupport)
     {
-        switch (PhCsGraphColorMode)
+        switch (PhSiGetGraphPalette())
         {
-        case 0: // New colors
+        case PhSiGraphPaletteLight:
             SetTextColor(hdc, RGB(0x00, 0x00, 0x00));
             //SetDCBrushColor(hdc, RGB(0xff, 0xff, 0xff));
-            //FillRect(hdc, Rect, PhGetStockBrush(DC_BRUSH));
+            //FillRect(hdc, Rect, PhStockDcBrush);
             break;
-        case 1: // Old colors
+        case PhSiGraphPaletteDark:
             SetTextColor(hdc, RGB(0xff, 0xff, 0xff));
             //SetDCBrushColor(hdc, RGB(0xff, 0xff, 0x00));
-            //FillRect(hdc, Rect, PhGetStockBrush(DC_BRUSH));
+            //FillRect(hdc, Rect, PhStockDcBrush);
             break;
         }
 
@@ -2084,11 +2098,44 @@ VOID PhSipDefaultDrawPanel(
     else
         flags |= DT_END_ELLIPSIS;
 
+    if (CurrentView == SysInfoSummaryView && PhGraphRenderOptions.Smooth && DrawPanel->Title)
+    {
+        COLORREF textColor = GetTextColor(hdc);
+        RECT titleRect = rect;
+        RECT subTitleRect = rect;
+        RECT chipRect;
+        HFONT oldFont;
+
+        // Chip behind the title block so the grid and lines don't run through the text.
+        oldFont = SelectFont(hdc, CurrentParameters.MediumFont);
+        DrawText(hdc, DrawPanel->Title->Buffer, (ULONG)DrawPanel->Title->Length / sizeof(WCHAR), &titleRect, flags | DT_SINGLELINE | DT_CALCRECT);
+        chipRect = titleRect;
+
+        if (DrawPanel->SubTitle)
+        {
+            SelectFont(hdc, CurrentParameters.Font);
+            subTitleRect.top += CurrentParameters.MediumFontHeight + CurrentParameters.PanelPadding;
+            DrawText(hdc, DrawPanel->SubTitle->Buffer, (ULONG)DrawPanel->SubTitle->Length / sizeof(WCHAR), &subTitleRect, flags | DT_CALCRECT);
+            chipRect.right = max(chipRect.right, subTitleRect.right);
+            chipRect.bottom = min(subTitleRect.bottom, DrawPanel->Rect.bottom);
+        }
+
+        if (oldFont) SelectFont(hdc, oldFont);
+
+        InflateRect(&chipRect, CurrentParameters.PanelPadding, CurrentParameters.PanelPadding / 2);
+        PhStabilizeGraphTextBox(&Section->PanelTextBoxState, &chipRect, FALSE);
+        PhDrawGraphTextBox(hdc, &chipRect, CurrentParameters.GraphBackColor, PhGsMixColor(CurrentParameters.GraphBackColor, textColor, 38));
+    }
+
     if (DrawPanel->Title)
     {
         HFONT oldFont = SelectFont(hdc, CurrentParameters.MediumFont);
         DrawText(hdc, DrawPanel->Title->Buffer, (ULONG)DrawPanel->Title->Length / sizeof(WCHAR), &rect, flags | DT_SINGLELINE);
         if (oldFont) SelectFont(hdc, oldFont);
+
+        // Smooth graphs: the panel values are muted under the title.
+        if (CurrentView == SysInfoSummaryView && PhGraphRenderOptions.Smooth)
+            SetTextColor(hdc, PhGsMixColor(GetTextColor(hdc), CurrentParameters.GraphBackColor, 70));
     }
 
     if (DrawPanel->SubTitle)
